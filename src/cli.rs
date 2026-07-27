@@ -22,9 +22,8 @@ pub const DEFAULT_ROUND_PADDING: f64 = 0.1;
 	version,
 	about = "Convert an SVG to PNG / ICO / ICNS, or resize an SVG"
 )]
-// `Option<Option<PathBuf>>` is how clap spells a flag with an optional value,
-// and all three cases are meaningful here: absent, present bare (derive the
-// name), present with a path.
+// `Option<Option<PathBuf>>` is how clap spells a flag with an optional value, and all three cases
+// are meaningful here: absent, present bare (derive the name), present with a path.
 #[allow(clippy::option_option)]
 pub struct Cli {
 	/// Input SVG file
@@ -75,8 +74,8 @@ pub struct Cli {
 }
 
 impl Cli {
-	/// `true` when no output target was requested, in which case `--svg` is
-	/// implied. Any explicit target turns that default off.
+	/// `true` when no output target was requested, in which case `--svg` is implied. Any explicit
+	/// target turns that default off.
 	pub fn no_target(&self) -> bool {
 		self.svg.is_none()
 			&& self.png.is_none()

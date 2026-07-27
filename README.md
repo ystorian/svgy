@@ -124,11 +124,16 @@ sizeable one.
 
 ## Behaviour
 
-- **Order of operations**: read -> resize -> round -> write each target. Rounding runs last, inside
+- **Order of operations**: read -> strip text -> resize -> round -> write each target. Rounding runs last, inside
   whatever canvas `--size` set, and the raster targets are rendered from the resized SVG.
 - **`--round` is a target, not a modifier.** `svgy logo.svg --round --icns` writes a round SVG _and
-  a normal `.icns`_ — the icon is not round-fitted. For round icons, run svgy twice and feed it the
+  a normal `.icns`_, the icon is not round-fitted. For round icons, run svgy twice and feed it the
   round SVG.
+- **Text is removed.** `<text>` and its children are stripped from the source before anything else
+  runs, so every target agrees on what the artwork is: it is absent from `--svg` just as it is from
+  `--png`, `--ico` and `--icns`, and `--round` fits the circle to what remains. svgy prints a
+  warning when it removes text. Convert text to paths before converting the icon. In Inkscape,
+  select the text and use **Path > Object to Path** (`Shift+Ctrl+C`).
 - **One input at a time.** Globs and multiple inputs are not supported; use a shell loop.
 - **Missing directories are created.** A destination may name a subdirectory that does not exist
   yet, as the icons example above does.
