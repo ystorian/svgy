@@ -164,7 +164,7 @@ publish_check:
 		echo "{{error(['The', BOLD + 'publish', 'key is not set in', BOLD + 'Cargo.toml'])}}" && exit 1; fi
 
 	echo "{{dim('publish = true')}}"
-	if [ -n "$(tomli query --filepath Cargo.toml workspace.package.publish 2>/dev/null || tomli query --filepath Cargo.toml package.publish 2>/dev/null)" ] ; then \
+	if [ "$({ tomli query --filepath Cargo.toml workspace.package.publish 2>/dev/null || tomli query --filepath Cargo.toml package.publish 2>/dev/null ; } | tr -d '[:space:]')" != "true" ] ; then \
 		echo "{{error(['The', BOLD + 'publish', 'key is not set to', BOLD + 'true'])}}" && exit 1; fi
 
 	echo {{CYAN}}Run {{YELLOW}}cargo publish{{CYAN}} in {{GREEN}}dry-run{{NORMAL}}
