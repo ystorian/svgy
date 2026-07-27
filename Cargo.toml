@@ -1,0 +1,39 @@
+[package]
+name = "svgy"
+version = "0.1.0"
+edition = "2024"
+description = "Convert an SVG to optimized icons for all platforms"
+license = "MIT OR Apache-2.0"
+authors = ["Flavien Scheurer <flavien+svgy@ystorian.com"]
+repository = "https://github.com/ystorian/svgy"
+readme = "README.md"
+publish = true
+
+exclude = [
+	".DS_Store",
+	".editorconfig",
+	".gitignore",
+	".github",
+	".just",
+	".markdownlint.json",
+	".vscode",
+	"deny.toml",
+	"justfile",
+	"tests",
+]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+resvg = "0.47"
+oxipng = { version = "10.1", features = ["parallel", "zopfli"], default-features = false }
+quick-xml = "0.41"
+svgtypes = "0.16"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+debug = "none"
+panic = "abort"
