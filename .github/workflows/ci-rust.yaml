@@ -4,8 +4,8 @@ name: CI
 
 on:
   schedule:
-    # Runs at 08:00 UTC every Monday.
-    - cron: 0 8 * * 1
+    # Runs at 06:00 UTC every Monday.
+    - cron: 0 6 * * 1
   workflow_dispatch: # Allows manual triggering
   push:
     # Run on push to branchs, ignore push to tags

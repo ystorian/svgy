@@ -84,6 +84,7 @@ check_actions:
 	echo {{ done('') }}
 
 # List action secrets for the environment
+[env("GITHUB_TOKEN", github_token)]
 [group('GitHub Actions')]
 env_list_secrets env='production' repo=repo:
 	echo {{ CYAN }}List the {{ BOLD }}action secrets{{ NORMAL + CYAN }} for the {{ YELLOW + env + NORMAL + CYAN }} environment in {{ GREEN + owner + '/' + repo + NORMAL }}
@@ -97,6 +98,7 @@ env_list_secrets env='production' repo=repo:
 	echo {{ done('') }}
 
 # List all secrets not environment restricted
+[env("GITHUB_TOKEN", github_token)]
 [group('GitHub Actions')]
 env_list_secrets_all repo=repo:
 	echo {{ CYAN }}List {{ BOLD }}all secrets{{ NORMAL + CYAN }} that are {{ YELLOW + 'not environment restricted' + NORMAL + CYAN }} in {{ GREEN + owner + '/' + repo + NORMAL }}
@@ -109,6 +111,7 @@ env_list_secrets_all repo=repo:
 	echo {{ done('') }}
 
 # Add an action secret to an environment
+[env("GITHUB_TOKEN", github_token)]
 [group('GitHub Actions')]
 env_set_secret secret env='production':
 	echo {{ CYAN }}Add the {{ BOLD }}action secret {{ NORMAL + YELLOW + uppercase(secret) + CYAN }} to the  {{ BOLD + env + NORMAL + CYAN }} environment in {{ GREEN + owner + '/' + repo + NORMAL }}
@@ -122,40 +125,31 @@ env_set_secret secret env='production':
 	echo {{ done('') }}
 
 # Create an environment
+[env("GITHUB_TOKEN", github_token)]
 [group('GitHub Actions')]
 create_env repo=repo env='production':
 	echo {{ CYAN }}Create the {{ YELLOW + env + CYAN }} environment in {{ GREEN + owner + '/' + repo + NORMAL }}
 	just check_command_gh
-	echo "{{ dim('Created at: ' + shell("
-		gh \
-			api \
-			--method PUT \
-			repos/{owner}/{{repo}}}/environments/{{env}} \
-			--jq '.created_at'
-		")) }}"
+	gh api --method PUT repos/{{ owner }}/{{ repo }}/environments/{{ env }}
 
 	echo {{ CYAN }}Set a custom branch policy{{ NORMAL }}
-	echo "{{ dim('Custom branch policies: ' + shell("
-		gh \
-			api \
-			--method PUT repos/{owner}/{{repo}}}/environments/{{env}} \
-			--field deployment_branch_policy[protected_branches]=false \
-			--field deployment_branch_policy[custom_branch_policies]=true \
-			--jq '.deployment_branch_policy.custom_branch_policies'
-		")) }}"
+	gh \
+		api \
+		--method PUT repos/{{ owner }}/{{ repo }}/environments/{{ env }} \
+		--field deployment_branch_policy[protected_branches]=false \
+		--field deployment_branch_policy[custom_branch_policies]=true
 
-	echo {{ CYAN }}Set the branch protection to the {{ GREEN + main_branch + CYAN }} branch{{ NORMAL }}
-	echo "{{ dim('Branch policies: ' + shell("
-		gh \
-			api \
-			--method POST \
-			repos/{owner}/{repo}/environments/{{env}}/deployment-branch-policies \
-			--field name=main \
-			--jq '.total_count'
-		")) }}"
+	echo {{ CYAN }}Set branch protection on the {{ GREEN + main_branch + CYAN }} branch{{ NORMAL }}
+	gh \
+		api \
+		--method POST \
+		repos/{{ owner }}/{{ repo }}/environments/{{ env }}/deployment-branch-policies \
+		--field name=main
+
 	echo {{ done('') }}
 
 # List the environments
+[env("GITHUB_TOKEN", github_token)]
 [group('GitHub Actions')]
 list_envs repo=repo:
 	echo {{ CYAN }}List environments in {{ GREEN + owner }}/{{ BOLD + repo + NORMAL }}
