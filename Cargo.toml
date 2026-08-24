@@ -42,7 +42,7 @@ debug = "none"
 panic = "abort"
 
 
-# Profile for GitHub action, used by `.github/workflows/rust.yml`
+# Profile for GitHub action, used by `.github/workflows/ci-rust.yaml`
 [profile.ci]
 inherits = "dev"
 debug = false
