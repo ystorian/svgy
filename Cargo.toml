@@ -25,6 +25,19 @@ exclude = [
 	"justfile",
 ]
 
+[package.metadata.binstall]
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
+[package.metadata.binstall.overrides.aarch64-pc-windows-msvc]
+pkg-fmt = "zip"
+
+[package.metadata.binstall.signing]
+algorithm = "minisign"
+pubkey = "RWRukfafJ1oiG5PP1IKXRgoI7ntXPbys8WUm9ol6oanMKxEtXdbXisri"
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4.6", features = ["derive"] }

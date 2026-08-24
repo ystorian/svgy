@@ -10,8 +10,36 @@ Turn one SVG into all the icons a project needs: resized and optimized SVGs, PNG
 
 ## Install
 
+### Prebuilt binary
+Install in seconds using signed binary, for Linux, macOS, and Windows, on x64 and arm64:
+
+```shell
+cargo binstall svgy
+```
+
+### Source
+Install from source using [crates.io](https://crates.io/crates/svgy):
+
+```shell
+cargo install svgy
+```
+
+### Local
+Install from a clone of this repository:
+
 ```shell
 cargo install --path .
+```
+
+### Signatures
+
+Every release archive is signed with [minisign](https://jedisct1.github.io/minisign/). The public
+key is in `Cargo.toml`.
+
+To check an archive downloaded from the releases page:
+
+```shell
+minisign -V -m <source archive> -P <public key>
 ```
 
 ## Synopsis

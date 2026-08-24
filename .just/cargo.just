@@ -235,3 +235,11 @@ check_msrv:
 	' \
 	| column -t
 	echo {{ NORMAL }}
+
+# Create a minisign key pair
+[group('Cargo')]
+[no-exit-message]
+create_minisign_keys:
+	echo {{ CYAN }}Create a {{ YELLOW }}Minisign{{ NORMAL + CYAN }} key pair{{ NORMAL }}
+	minisign -G -p signing.pub -s signing.key
+	echo {{ done('') }}

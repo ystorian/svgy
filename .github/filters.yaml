@@ -20,6 +20,7 @@ _common: &common
   - "!.env*"
   - "!.githooks/**"
   - "!.github/filters.yaml"
+  - "!.github/workflows/release.yaml"
   - "!justfile"
   - "!.just/**"
   - "!LICENSE*"
