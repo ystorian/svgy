@@ -2,6 +2,7 @@
 name = "svgy"
 version = "0.2.0"
 edition = "2024"
+rust-version = "1.88"
 description = "Convert an SVG to optimized icons for all platforms"
 license = "MIT OR Apache-2.0"
 authors = ["Flavien Scheurer <flavien+svgy@ystorian.com"]
@@ -9,27 +10,27 @@ repository = "https://github.com/ystorian/svgy"
 readme = "README.md"
 publish = true
 exclude = [
+	".githooks",
+	".github",
+	".just",
+	".vscode",
+	"tests",
 	".DS_Store",
 	".editorconfig",
 	".gitignore",
-	".github",
-	".just",
 	".markdownlint.json",
-	".vscode",
+	".rustfmt.toml",
 	"deny.toml",
+	"Icon*",
 	"justfile",
-	"tests",
 ]
 
 [dependencies]
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
-# `text` is off on purpose: icons are path artwork, and the feature pulls in an
-# unmaintained font stack (rustybuzz/ttf-parser, RUSTSEC-2026-0206/0192) for 25
-# dependencies svgy never uses. Re-enabling it puts those advisories back; see
-# `svg_text::strip_text` for the removal and warning that cover the gap.
-resvg = { version = "0.47", default-features = false, features = ["raster-images"] }
-oxipng = { version = "10.1", features = ["parallel", "zopfli"], default-features = false }
+clap = { version = "4.6", features = ["derive"] }
+# resvg: `text` is off on purpose.
+resvg = { version = "0.48", default-features = false, features = ["raster-images"] }
+oxipng = { version = "10.2", features = ["parallel", "zopfli"], default-features = false }
 quick-xml = "0.41"
 svgtypes = "0.16"
 
