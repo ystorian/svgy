@@ -1,29 +1,15 @@
 [package]
 name = "svgy"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.88"
 description = "Convert an SVG to optimized icons for all platforms"
 license = "MIT OR Apache-2.0"
-authors = ["Flavien Scheurer <flavien+svgy@ystorian.com"]
+authors = ["Flavien Scheurer <flavien+svgy@ystorian.com>"]
 repository = "https://github.com/ystorian/svgy"
 readme = "README.md"
 publish = true
-exclude = [
-	".githooks",
-	".github",
-	".just",
-	".vscode",
-	"tests",
-	".DS_Store",
-	".editorconfig",
-	".gitignore",
-	".markdownlint.json",
-	".rustfmt.toml",
-	"deny.toml",
-	"Icon*",
-	"justfile",
-]
+include = ["src/**/*.rs", "Cargo.toml", "Cargo.lock", "README.md", "/*.svg", "LICENSE-*"]
 
 [package.metadata.binstall]
 pkg-fmt = "tgz"
@@ -56,7 +42,7 @@ debug = "none"
 panic = "abort"
 
 
-# Profile for GitHub action, used by `.github/workflows/rust.yml`
+# Profile for GitHub action, used by `.github/workflows/ci-rust.yaml`
 [profile.ci]
 inherits = "dev"
 debug = false

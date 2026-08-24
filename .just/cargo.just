@@ -13,6 +13,12 @@ native_target := if os() == 'windows' { arch() + '-pc-windows-msvc' } else if os
 # GitHub auth token.
 github_token := if which("gh") == [] { '' } else { shell('gh auth token') }
 
+# Return true if publish is true in Cargo.toml (supports workspace).
+cargo_is_publishable := if trim(shell('tomli query --filepath Cargo.toml workspace.package.publish 2>/dev/null || tomli query --filepath Cargo.toml package.publish 2>/dev/null || echo false')) == 'true' { 'true' } else {'false'}
+# Return true if package is set using `include` in Cargo.toml (supports workspace).
+cargo_has_include := if trim(shell('tomli query --filepath Cargo.toml workspace.package.include 2>/dev/null || tomli query --filepath Cargo.toml package.include 2>/dev/null || echo false')) =~ 'Cargo' { 'true' } else {'false'}
+
+
 # Install cargo tools
 [env("GITHUB_TOKEN", github_token)]
 [group('Cargo')]
@@ -87,34 +93,34 @@ bump_all_deps:
 	-just update_actions
 	echo {{ done('') }}
 
-# Verify the crate is publishable with a dry run
+# Check crate for publication in crates.io
 [group('Cargo')]
 [no-exit-message]
 publish_check:
-	echo {{ CYAN }}Check if this crate is publishable{{ NORMAL }}
+	echo {{ CYAN }}Check this crate{{ NORMAL }}
 
-	just check_tag {{ tag }}
-
-	echo "{{ dim('Cargo.toml -> [package] -> publish') }}"
-	if [ "$(tomli query --filepath Cargo.toml workspace.package.publish 2>/dev/null || tomli query --filepath Cargo.toml package.publish 2>/dev/null)" = "" ] ; then \
-		echo "{{ error(['The', BOLD + 'publish', 'key is not set in', BOLD + 'Cargo.toml']) }}" && \
+	echo "{{ dim('Cargo.toml: package.publish = true') }}"
+	if [ "{{cargo_is_publishable}}" = "false" ] ; then \
+		echo "{{ error([BOLD + 'package.publish = true', 'is not set in', BOLD + 'Cargo.toml']) }}" && \
 		exit 1 \
 	;fi
 
-	echo "{{ dim('publish = true') }}"
-	if [ -n "$(tomli query --filepath Cargo.toml workspace.package.publish 2>/dev/null || tomli query --filepath Cargo.toml package.publish 2>/dev/null)" ] ; then \
-		echo "{{ error(['The', BOLD + 'publish', 'key is not set to', BOLD + 'true']) }}" && \
+	echo "{{ dim('Cargo.toml: package.include = [...]') }}"
+	if [ "{{cargo_has_include}}" = "false" ] ; then \
+		echo "{{ error([BOLD + 'package.include', 'is not set in', BOLD + 'Cargo.toml']) }}" && \
 		exit 1 \
 	;fi
+
+	echo {{ CYAN }}List {{ YELLOW }}non-standard{{ CYAN }} files that will be included{{ RED }}
+	cargo package --list --allow-dirty | grep -vE '^(Cargo\.toml(\.orig)?|Cargo\.lock|\.cargo_vcs_info\.json|src/.*|LICENSE.*|README.*|[a-z]*\.svg)$'
 
 	echo {{ CYAN }}Run {{ YELLOW }}cargo publish{{ CYAN }} in {{ GREEN }}dry-run{{ NORMAL }}
 	cargo publish --dry-run --all-features --workspace --locked --allow-dirty
 
-	echo {{ done('') }}
 
 # Publish the crate to crates.io
 [group('Cargo')]
-publish: publish_check
+publish: publish_check check_tag
 	echo {{ CYAN }}Publish to {{ GREEN }}crates.io{{ NORMAL }}
 	cargo publish
 	echo {{ done('') }}
