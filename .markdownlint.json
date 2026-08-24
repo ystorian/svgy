@@ -1,5 +1,5 @@
 // .markdownlint.json
-// Last refresh: 2026-05-18
+// Last refresh: 2026-08-04
 {
 	"default": true,
 	// Headings must use ATX style: line with 1 to 6 hashes `#` followed by 1 space.
@@ -29,6 +29,8 @@
 	},
 	// Allow multiple blockquotes separated by a blank line.
 	"MD028": false,
+	// Allow compact lists.
+	"MD032": false,
 	// Allow some inline HTML tags.
 	"MD033": {
 		"allowed_elements": [
@@ -38,6 +40,8 @@
 			"button"
 		]
 	},
+	// Allow emphasis (bold) text as sub-heading.
+	"MD036": false,
 	// Disable heading requirements.
 	"MD041": false,
 	// Do not require alt-text for images.

@@ -1,4 +1,10 @@
-# SVGY
+# <img src="https://raw.githubusercontent.com/ystorian/svgy/main/svgy.svg" width="48" align="absmiddle" alt="SVGY logo"> SVGY
+
+**Generate icons from SVG**
+
+![Build Status](https://github.com/ystorian/svgy/actions/workflows/ci-rust.yaml/badge.svg)
+[![Crates.io](https://img.shields.io/crates/v/svgy.svg)](https://crates.io/crates/svgy)
+[![docs.rs](https://docs.rs/svgy/badge.svg)](https://docs.rs/svgy)
 
 Turn one SVG into all the icons a project needs: resized and optimized SVGs, PNGs, Windows `.ico` macOS `.icns`, or all of them in a single pass.
 
@@ -88,19 +94,19 @@ of sizes per platform.
 
 ## Sizing
 
-All sizing parameters are optional.
+All sizing parameters are optional, and they all preserve the aspect ratio.
 
-- `--size=<pixels>`: Resize to a square of `<pixels>` by `<pixels>`, preserving the aspect ratio.
-- `--width=<pixels>`: Resize to the specified width, keeping proportions.
-- `--height=<pixels>`: Resize to the specified height, keeping proportions.
-  Passing `--width` and `--height` together fits the artwork inside that box.
+- `--size=<pixels>`: Resize to a square of `<pixels>` by `<pixels>`.
+- `--width=<pixels>`: Resize to the specified **width**.
+- `--height=<pixels>`: Resize to the specified **height**.
 - `--no-resize`: Keep the original dimensions.
 
-The sizing parameters `--size` | `--width` | `--height` are mutually exclusive.
+**Notes:**
+- Passing `--width` and `--height` together fits the artwork inside that box.
+- The sizing parameters `--size`, `--width`, `--height` are mutually exclusive.
+- For icons, non-square source SVGs are resized and centered.
+- Sizing parameters do not apply to `.ico` and `.icns` since they have fixed size sets.
 
-For icons, non-square source SVGs are resized and centered. `.ico` and `.icns` have fixed size sets,
-so sizing parameters do not apply to them and are ignored when an icon target appears alongside a
-sizeable one.
 
 ## Rounding
 
@@ -124,11 +130,11 @@ sizeable one.
 
 ## Behaviour
 
-- **Order of operations**: read -> strip text -> resize -> round -> write each target. Rounding runs last, inside
-  whatever canvas `--size` set, and the raster targets are rendered from the resized SVG.
-- **`--round` is a target, not a modifier.** `svgy logo.svg --round --icns` writes a round SVG _and
-  a normal `.icns`_, the icon is not round-fitted. For round icons, run svgy twice and feed it the
-  round SVG.
+- **Order of operations**: read -> strip text -> resize -> round -> write each target. Rounding runs
+  last, inside whatever canvas `--size` set, and the raster targets are rendered from the resized
+  SVG.
+- **`--round` is a target** `svgy logo.svg --round --icns` writes a round SVG _and a normal
+  `.icns`_, the icon is not round-fitted. For round icons, run svgy twice and feed it the round SVG.
 - **Text is removed.** `<text>` and its children are stripped from the source before anything else
   runs, so every target agrees on what the artwork is: it is absent from `--svg` just as it is from
   `--png`, `--ico` and `--icns`, and `--round` fits the circle to what remains. svgy prints a
