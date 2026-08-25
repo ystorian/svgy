@@ -1,25 +1,38 @@
 //! PNG optimization via oxipng.
 
+use crate::cli::Cli;
 use anyhow::{Context, Result};
 
-/// Above this many pixels per side, Zopfli's runtime stops being worth the handful of bytes it
-/// saves and preset 6's libdeflater takes over.
-const ZOPFLI_MAX_PX: u32 = 512;
+/// Preset used by default.
+const PRESET: u8 = 4;
 
-/// Optimize PNG bytes with oxipng when `enabled`, otherwise return them as-is.
-///
-/// Icons are small and written once, so we spend the time: preset 6 tries every filter, and up to
-/// [`ZOPFLI_MAX_PX`] Zopfli re-deflates the result better than libdeflater. `px` is the side length
-/// of the image the PNG was rendered at.
-pub fn maybe_optimize(png: Vec<u8>, enabled: bool, px: u32) -> Result<Vec<u8>> {
-	if !enabled {
+/// How much effort to spend on a PNG.
+#[derive(Clone, Copy)]
+pub struct Opts {
+	/// Whether to run oxipng, cleared by `--no-optimize`.
+	pub enabled: bool,
+	/// Whether to compress with Zopfli, set by `--zopfli`.
+	pub zopfli: bool,
+}
+
+impl Opts {
+	pub fn from_cli(cli: &Cli) -> Self {
+		Self {
+			enabled: !cli.no_optimize,
+			zopfli: cli.zopfli,
+		}
+	}
+}
+
+/// Optimize PNG bytes with oxipng when enabled, otherwise return them as-is.
+pub fn maybe_optimize(png: Vec<u8>, opts: Opts) -> Result<Vec<u8>> {
+	if !opts.enabled {
 		return Ok(png);
 	}
-	// Preset 6 already deflates with libdeflater at its highest level, so the large-image path is
-	// simply the preset left alone.
-	let mut opts = oxipng::Options::from_preset(6);
-	if px <= ZOPFLI_MAX_PX {
-		opts.deflater = oxipng::Deflater::Zopfli(oxipng::ZopfliOptions::default());
+	let mut options = oxipng::Options::from_preset(PRESET);
+	options.optimize_alpha = true;
+	if opts.zopfli {
+		options.deflater = oxipng::Deflater::Zopfli(oxipng::ZopfliOptions::default());
 	}
-	oxipng::optimize_from_memory(&png, &opts).context("oxipng optimization")
+	oxipng::optimize_from_memory(&png, &options).context("oxipng optimization")
 }

@@ -89,7 +89,7 @@ const SPECS: &[IconSpec] = &[
 ];
 
 /// Render every standard size and assemble a `.icns` file.
-pub fn write_icns(tree: &usvg::Tree, optimize_png: bool, out: &Path) -> Result<()> {
+pub fn write_icns(tree: &usvg::Tree, opt: optimize::Opts, out: &Path) -> Result<()> {
 	// Eleven OSTypes cover eight distinct sizes, so both the render and (where the format matches)
 	// the encode are shared. 32 x 32 is rendered once but encoded twice: `ic05` wants ARGB-RLE,
 	// `ic11` wants PNG.
@@ -111,9 +111,9 @@ pub fn write_icns(tree: &usvg::Tree, optimize_png: bool, out: &Path) -> Result<(
 				cached.clone()
 			} else {
 				let raw = render::encode_png(pixmap)?;
-				let opt = optimize::maybe_optimize(raw, optimize_png, spec.px)?;
-				png_cache.insert(spec.px, opt.clone());
-				opt
+				let optimized = optimize::maybe_optimize(raw, opt)?;
+				png_cache.insert(spec.px, optimized.clone());
+				optimized
 			};
 			write_chunk(&mut chunks, *spec.ostype, &png);
 		}

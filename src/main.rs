@@ -59,14 +59,15 @@ fn run() -> Result<()> {
 	// One parse shared by every raster target.
 	if cli.png.is_some() || cli.ico.is_some() || cli.icns.is_some() {
 		let tree = render::load_tree_from_data(resized.as_bytes())?;
+		let opt = optimize::Opts::from_cli(&cli);
 
 		if let Some(dest) = &cli.png {
 			let out = resolve_output(&cli, dest.as_deref(), &cli.suffix, "png")?;
-			write_png(&tree, &out, !cli.no_optimize)?;
+			write_png(&tree, &out, opt)?;
 		}
 		if let Some(dest) = &cli.ico {
 			let out = resolve_output(&cli, dest.as_deref(), &cli.suffix, "ico")?;
-			let entries = ico::write_ico(&tree, !cli.no_optimize, !cli.no_legacy, &out)?;
+			let entries = ico::write_ico(&tree, opt, !cli.no_legacy, &out)?;
 			println!(
 				"Wrote {} ({} sizes, {entries} entries)",
 				out.display(),
@@ -75,7 +76,7 @@ fn run() -> Result<()> {
 		}
 		if let Some(dest) = &cli.icns {
 			let out = resolve_output(&cli, dest.as_deref(), &cli.suffix, "icns")?;
-			icns::write_icns(&tree, !cli.no_optimize, &out)?;
+			icns::write_icns(&tree, opt, &out)?;
 			println!("Wrote {}", out.display());
 		}
 	}
@@ -106,13 +107,13 @@ fn cmd_png_size(tree: &usvg::Tree) -> (u32, u32) {
 	(round(size.width()), round(size.height()))
 }
 
-fn write_png(tree: &usvg::Tree, out: &Path, optimize_png: bool) -> Result<()> {
+fn write_png(tree: &usvg::Tree, out: &Path, opt: optimize::Opts) -> Result<()> {
 	// The tree already carries the requested size, so the PNG is its intrinsic size: no letterbox,
 	// and `--size` means the same thing it does for the SVG.
 	let (w, h) = cmd_png_size(tree);
 	let pixmap = render::render_size(tree, w, h)?;
 	let png = render::encode_png(&pixmap)?;
-	let png = optimize::maybe_optimize(png, optimize_png, w.max(h))?;
+	let png = optimize::maybe_optimize(png, opt)?;
 	std::fs::write(out, &png).with_context(|| format!("writing {}", out.display()))?;
 	println!("Wrote {} ({w}x{h}, {} bytes)", out.display(), png.len());
 	Ok(())

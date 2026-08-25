@@ -25,6 +25,8 @@ pub const DEFAULT_ROUND_PADDING: f64 = 0.1;
 // `Option<Option<PathBuf>>` is how clap spells a flag with an optional value, and all three cases
 // are meaningful here: absent, present bare (derive the name), present with a path.
 #[allow(clippy::option_option)]
+// The flags are independent switches on one command line.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Cli {
 	/// Input SVG file
 	pub input: PathBuf,
@@ -65,9 +67,15 @@ pub struct Cli {
 	/// Keep the original dimensions
 	#[arg(long = "no-resize")]
 	pub no_resize: bool,
+
 	/// Skip oxipng optimization
 	#[arg(long = "no-optimize")]
 	pub no_optimize: bool,
+
+	/// Compress PNGs with Zopfli: 1~5% smaller, 100x times slower
+	#[arg(long)]
+	pub zopfli: bool,
+
 	/// Skip the 256-color BMP entries for 16x16 and 32x32
 	#[arg(long = "no-legacy-ico")]
 	pub no_legacy: bool,
@@ -188,6 +196,15 @@ mod tests {
 		assert_eq!(cli.padding, Some(0.25));
 		let cli = parse(&["svgy", "logo.svg", "--round"]);
 		assert_eq!(cli.padding, None);
+	}
+
+	/// Zopfli is opt-in.
+	#[test]
+	fn zopfli_is_off_by_default() {
+		let cli = parse(&["svgy", "logo.svg", "--png"]);
+		assert!(!cli.zopfli);
+		let cli = parse(&["svgy", "logo.svg", "--png", "--zopfli"]);
+		assert!(cli.zopfli);
 	}
 
 	#[test]
