@@ -362,8 +362,7 @@ fn strip_background(src: &str, min_x: f64, min_y: f64, w: f64, h: f64) -> Result
 /// A drawable, visibly-filled shape whose bounding box covers the whole viewBox.
 fn is_background(e: &BytesStart, bx: (f64, f64, f64, f64)) -> Result<bool> {
 	let (min_x, min_y, w, h) = bx;
-	let local = e.local_name();
-	let local = std::str::from_utf8(local.as_ref())?.to_string();
+	let local = e.local_name().into_inner().to_string();
 
 	let Some((bminx, bminy, bmaxx, bmaxy)) = element_bbox(&local, e)? else {
 		return Ok(false);
@@ -525,8 +524,7 @@ fn extend(bb: &mut Option<(f64, f64, f64, f64)>, x: f64, y: f64) {
 }
 
 fn process_element(e: &BytesStart, s: f64, tx: f64, ty: f64) -> Result<BytesStart<'static>> {
-	let local = e.local_name();
-	let local = std::str::from_utf8(local.as_ref())?.to_string();
+	let local = e.local_name().into_inner().to_string();
 
 	// Gradient/pattern coords are only user-space (scalable) under userSpaceOnUse.
 	let is_grad = matches!(
@@ -544,11 +542,11 @@ fn process_element(e: &BytesStart, s: f64, tx: f64, ty: f64) -> Result<BytesStar
 		true
 	};
 
-	let name = std::str::from_utf8(e.name().as_ref())?.to_string();
+	let name = e.name().into_inner().to_string();
 	let mut out = BytesStart::new(name);
 	for attr in e.attributes() {
 		let attr = attr.map_err(|err| anyhow!("attribute: {err}"))?;
-		let key = std::str::from_utf8(attr.key.as_ref())?.to_string();
+		let key = attr.key.into_inner().to_string();
 		let val = attr
 			.normalized_value(quick_xml::XmlVersion::Implicit1_0)?
 			.into_owned();
@@ -822,8 +820,7 @@ fn parse_root_box(src: &str) -> Result<(f64, f64, f64, f64)> {
 }
 
 fn root_box(e: &BytesStart) -> Result<(f64, f64, f64, f64)> {
-	let local = e.local_name();
-	let local = std::str::from_utf8(local.as_ref())?;
+	let local = e.local_name().into_inner();
 	if local != "svg" {
 		bail!("root element is <{local}>, expected <svg>");
 	}
@@ -843,7 +840,7 @@ fn root_box(e: &BytesStart) -> Result<(f64, f64, f64, f64)> {
 fn attr_value(e: &BytesStart, key: &str) -> Result<Option<String>> {
 	for attr in e.attributes() {
 		let attr = attr.map_err(|err| anyhow!("attribute: {err}"))?;
-		if attr.key.as_ref() == key.as_bytes() {
+		if attr.key.as_ref() == key {
 			return Ok(Some(
 				attr.normalized_value(quick_xml::XmlVersion::Implicit1_0)?
 					.into_owned(),

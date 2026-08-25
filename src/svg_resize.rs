@@ -58,8 +58,7 @@ fn process_element(
 	state: &mut State,
 	target: Target,
 ) -> Result<BytesStart<'static>> {
-	let local = e.local_name();
-	let local = std::str::from_utf8(local.as_ref())?.to_string();
+	let local = e.local_name().into_inner().to_string();
 
 	let is_root = !state.seen_root;
 	if is_root {
@@ -99,12 +98,12 @@ fn process_element(
 		true
 	};
 
-	let name = std::str::from_utf8(e.name().as_ref())?.to_string();
+	let name = e.name().into_inner().to_string();
 	let mut out = BytesStart::new(name);
 
 	for attr in e.attributes() {
 		let attr = attr.map_err(|err| anyhow!("attribute: {err}"))?;
-		let key = std::str::from_utf8(attr.key.as_ref())?.to_string();
+		let key = attr.key.into_inner().to_string();
 		let val = attr
 			.normalized_value(quick_xml::XmlVersion::Implicit1_0)?
 			.into_owned();
@@ -326,7 +325,7 @@ fn nums(vs: &[f64]) -> String {
 fn attr_value(e: &BytesStart, key: &str) -> Result<Option<String>> {
 	for attr in e.attributes() {
 		let attr = attr.map_err(|err| anyhow!("attribute: {err}"))?;
-		if attr.key.as_ref() == key.as_bytes() {
+		if attr.key.as_ref() == key {
 			return Ok(Some(
 				attr.normalized_value(quick_xml::XmlVersion::Implicit1_0)?
 					.into_owned(),
