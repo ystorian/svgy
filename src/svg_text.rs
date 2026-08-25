@@ -42,7 +42,7 @@ pub fn strip_text(src: &str) -> Result<(String, bool)> {
 }
 
 fn is_text(e: &BytesStart) -> bool {
-	e.local_name().as_ref() == b"text"
+	e.local_name().as_ref() == "text"
 }
 
 #[cfg(test)]
