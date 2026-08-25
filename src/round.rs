@@ -687,7 +687,7 @@ fn matrix_str(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) -> String {
 }
 
 /// Apply the affine to path `d`: absolute coords get `s*p + t`, relative deltas get `s*p`; arc
-/// rx/ry scale, rotation and flags are preserved. On parse error the original string is returned.
+/// rx/ry scale, rotation and flags are preserved.
 fn affine_path_data(d: &str, s: f64, tx: f64, ty: f64) -> String {
 	use svgtypes::{PathParser, PathSegment};
 
@@ -701,14 +701,17 @@ fn affine_path_data(d: &str, s: f64, tx: f64, ty: f64) -> String {
 	};
 
 	let mut out = String::new();
+	// A leading `m` is absolute.
+	let mut first = true;
 	for seg in PathParser::from(d) {
 		let Ok(seg) = seg else {
 			return d.to_string();
 		};
 		match seg {
 			PathSegment::MoveTo { abs, x, y } => {
-				let (x, y) = pt(x, y, abs);
-				cmd(&mut out, 'M', abs);
+				let absolute = abs || first;
+				let (x, y) = pt(x, y, absolute);
+				cmd(&mut out, 'M', absolute);
 				out.push_str(&two(x, y));
 			}
 			PathSegment::LineTo { abs, x, y } => {
@@ -781,6 +784,7 @@ fn affine_path_data(d: &str, s: f64, tx: f64, ty: f64) -> String {
 			}
 			PathSegment::ClosePath { abs } => cmd(&mut out, 'Z', abs),
 		}
+		first = false;
 		out.push(' ');
 	}
 	out.trim_end().to_string()
@@ -868,6 +872,15 @@ mod tests {
 		// abs M gets scale+translate; rel l gets scale only.
 		let out = affine_path_data("M10 10 l5 0", 2.0, 3.0, 4.0);
 		assert_eq!(out, "M 23 24 l 10 0");
+	}
+
+	/// A leading `m` is absolute, so it must take the translation;.
+	#[test]
+	fn affine_path_leading_relative_moveto_is_absolute() {
+		let out = affine_path_data("m10 10 l5 0", 2.0, 3.0, 4.0);
+		assert_eq!(out, "M 23 24 l 10 0");
+		let out = affine_path_data("M0 0 m10 10", 2.0, 3.0, 4.0);
+		assert_eq!(out, "M 3 4 m 20 20");
 	}
 
 	#[test]
