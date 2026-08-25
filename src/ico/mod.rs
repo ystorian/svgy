@@ -37,22 +37,26 @@ struct Entry {
 	data: Vec<u8>,
 }
 
-/// Render every standard size and assemble an `.ico` file. With `legacy`, the sizes in
-/// [`LEGACY_SIZES`] get a second, 256-color entry. Returns the number of entries written.
-pub fn write_ico(tree: &usvg::Tree, optimize_png: bool, legacy: bool, out: &Path) -> Result<usize> {
+/// Render every standard size and assemble an `.ico` file.
+///
+/// With `legacy`, the sizes in `LEGACY_SIZES` get a second, 256-color entry.
+///
+/// Returns the number of entries written.
+pub fn write_ico(
+	tree: &usvg::Tree,
+	opt: optimize::Opts,
+	legacy: bool,
+	out: &Path,
+) -> Result<usize> {
 	let mut entries: Vec<Entry> = Vec::with_capacity(SIZES.len() + LEGACY_SIZES.len());
 	for &px in SIZES {
 		let pixmap = render::render_size(tree, px, px)?;
 		let raw = render::encode_png(&pixmap)?;
-		// The PNG often ends up as an 8-bit palette, but it is a full-color entry as far as the
-		// directory is concerned: it keeps its alpha.
 		entries.push(Entry {
 			px,
 			bits: 32,
-			data: optimize::maybe_optimize(raw, optimize_png, px)?,
+			data: optimize::maybe_optimize(raw, opt)?,
 		});
-		// Listed after the PNG of the same size, so a reader that grabs the first entry it can use
-		// still gets the good one.
 		if legacy && LEGACY_SIZES.contains(&px) {
 			entries.push(Entry {
 				px,

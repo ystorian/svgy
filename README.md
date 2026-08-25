@@ -178,6 +178,8 @@ All sizing parameters are optional, and they all preserve the aspect ratio.
 
 - `--no-optimize`: Skip PNG optimization. Optimization dominates the runtime of an `.icns` or
   `.ico`, so this is the flag to reach for when iterating.
+- `--zopfli`: Compress every PNG with Zopfli. Saves a 1~5% more, but takes 100x more time (minutes
+  instead of seconds).
 - `--no-legacy-ico`: Skip the 256-color entries in the Windows icon, keeping only the PNG ones.
   Saves about 3.6 KiB, at the cost of dropping support for 256-color sessions and pre-Vista shells.
 
@@ -327,11 +329,11 @@ Resizing adds no `transform`: a uniform scale is origin-independent and commutes
 multiplying it into each coordinate renders identically to the source while preserving the original
 element structure. Existing transforms are rewritten in place rather than flattened.
 
-Every PNG goes through oxipng at preset 6. Icons are written once and read forever, so the pipeline
-trades time for bytes, but only where the trade is worth taking: up to 512 x 512 the Zopfli deflater
-saves roughly 2 to 5% over libdeflater, and above that its runtime grows far faster than the saving,
-so the largest entries keep preset 6's libdeflater. Capping Zopfli at 512 cuts a full `.icns` to
-roughly a quarter of the time and costs 1.8% in size. Pass `--no-optimize` to skip optimization
+Every PNG goes through `oxipng` at preset **4**, with alpha optimization on. Pass `--zopfli` to use
+the Zopfli deflater, this saves 1~5% more, 2% on average, but this requires minutes instead of
+seconds. Pass `--no-optimize` to skip optimization entirely.
+
+
 entirely.
 
 ## Requirements
