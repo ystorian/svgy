@@ -14,10 +14,9 @@ native_target := if os() == 'windows' { arch() + '-pc-windows-msvc' } else if os
 github_token := if which("gh") == [] { '' } else { shell('gh auth token') }
 
 # Return true if publish is true in Cargo.toml (supports workspace).
-cargo_is_publishable := if trim(shell('tomli query --filepath Cargo.toml workspace.package.publish 2>/dev/null || tomli query --filepath Cargo.toml package.publish 2>/dev/null || echo false')) == 'true' { 'true' } else {'false'}
+cargo_is_publishable := if trim(shell('tomli query --filepath Cargo.toml workspace.package.publish 2>/dev/null || tomli query --filepath Cargo.toml package.publish 2>/dev/null || echo false')) == 'true' { 'true' } else { 'false' }
 # Return true if package is set using `include` in Cargo.toml (supports workspace).
-cargo_has_include := if trim(shell('tomli query --filepath Cargo.toml workspace.package.include 2>/dev/null || tomli query --filepath Cargo.toml package.include 2>/dev/null || echo false')) =~ 'Cargo' { 'true' } else {'false'}
-
+cargo_has_include := if trim(shell('tomli query --filepath Cargo.toml workspace.package.include 2>/dev/null || tomli query --filepath Cargo.toml package.include 2>/dev/null || echo false')) =~ 'Cargo' { 'true' } else { 'false' }
 
 # Install cargo tools
 [env("GITHUB_TOKEN", github_token)]
@@ -81,7 +80,7 @@ lock_cargo:
 [group('Cargo')]
 bump_cargo:
 	echo {{ CYAN }}Bump all {{ YELLOW }}Cargo.lock{{ CYAN }} dependencies{{ NORMAL }}
-	cargo update
+	cargo update --verbose
 	echo {{ done('') }}
 
 # Update all dependencies and actions
@@ -93,20 +92,20 @@ bump_all_deps:
 	-just update_actions
 	echo {{ done('') }}
 
-# Check crate for publication in crates.io
+# Check the crate for publication in crates.io
 [group('Cargo')]
 [no-exit-message]
 publish_check:
 	echo {{ CYAN }}Check this crate{{ NORMAL }}
 
 	echo "{{ dim('Cargo.toml: package.publish = true') }}"
-	if [ "{{cargo_is_publishable}}" = "false" ] ; then \
+	if [ "{{ cargo_is_publishable }}" = "false" ] ; then \
 		echo "{{ error([BOLD + 'package.publish = true', 'is not set in', BOLD + 'Cargo.toml']) }}" && \
 		exit 1 \
 	;fi
 
 	echo "{{ dim('Cargo.toml: package.include = [...]') }}"
-	if [ "{{cargo_has_include}}" = "false" ] ; then \
+	if [ "{{ cargo_has_include }}" = "false" ] ; then \
 		echo "{{ error([BOLD + 'package.include', 'is not set in', BOLD + 'Cargo.toml']) }}" && \
 		exit 1 \
 	;fi
@@ -116,7 +115,6 @@ publish_check:
 
 	echo {{ CYAN }}Run {{ YELLOW }}cargo publish{{ CYAN }} in {{ GREEN }}dry-run{{ NORMAL }}
 	cargo publish --dry-run --all-features --workspace --locked --allow-dirty
-
 
 # Publish the crate to crates.io
 [group('Cargo')]
@@ -141,9 +139,10 @@ precommit_cargo:
 	;fi
 
 # Check if this release can be tagged `v#.#.#`
+[arg('allow_dirty', long='allow-dirty', value='true')]
 [group('Cargo')]
 [no-exit-message]
-check_tag tag=tag:
+check_tag tag=tag allow_dirty='false':
 	echo {{ CYAN }}Check if this release can be tagged {{ GREEN + tag + NORMAL }}
 
 	# Tag name starts with `v`.
@@ -191,16 +190,22 @@ check_tag tag=tag:
 
 	# Working tree is clean (no uncommitted files).
 	if [ -n "$(git status --porcelain)" ]; then \
-		echo "{{ error('The working tree is dirty') + style('dim') + YELLOW }}" && \
-		git status --porcelain && \
-		exit 1 \
+		if [ "{{ allow_dirty }}" = "false" ]; then \
+			echo "{{ error('The working tree is dirty') + style('dim') + YELLOW }}" && \
+			git status --porcelain && \
+			exit 1 \
+		;else \
+			echo "{{ warning(['The working tree is dirty -', BOLD + 'bypassed by', BOLD + ITALIC + '--allow-dirty']) + style('dim') + YELLOW }}" && \
+			git status --porcelain \
+		;fi \
 	;fi
 
 # Push an annotated release tag `v#.#.#`
+[arg('allow_dirty', long='allow-dirty', value='--allow-dirty')]
 [group('Cargo')]
 [no-exit-message]
-push_tag tag=tag commit='':
-	just check_tag {{ tag }}
+push_tag tag=tag commit='' allow_dirty='':
+	just check_tag {{ tag }} {{ allow_dirty }}
 
 	echo {{ CYAN }}Push the tag {{ GREEN + tag + NORMAL }}
 	git tag --sign {{ tag }} {{ commit }} --message "Release {{ tag }}"

@@ -38,6 +38,7 @@ _:
 
 # Project recipes.
 import '.just/ci.just'
+import '.just/svgy.just'
 
 # Project language recipes.
 import '.just/cargo.just'
