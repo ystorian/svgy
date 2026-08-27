@@ -13,9 +13,7 @@ use quick_xml::writer::Writer;
 use resvg::usvg;
 
 use crate::cli::DEFAULT_ROUND_PADDING;
-use crate::numeric::{
-	affine_length, fmt_num, parse_num_list, parse_px, scale_len_list, scale_length, split_num_unit,
-};
+use crate::numeric::{parse_num_list, parse_px, split_num_unit};
 use crate::render;
 
 /// Pixmap max dimension used for shape measurement.
@@ -551,261 +549,13 @@ fn process_element(e: &BytesStart, s: f64, tx: f64, ty: f64) -> Result<BytesStar
 			.normalized_value(quick_xml::XmlVersion::Implicit1_0)?
 			.into_owned();
 		let new_val = if do_scale {
-			affine_attr(&key, &val, s, tx, ty)
+			crate::affine::attr(&key, &val, s, tx, ty)
 		} else {
 			val
 		};
 		out.push_attribute((key.as_str(), new_val.as_str()));
 	}
 	Ok(out)
-}
-
-/// Apply the affine to one attribute. Position components get `s*n + t`; lengths and relative
-/// offsets get `s*n`.
-fn affine_attr(key: &str, val: &str, s: f64, tx: f64, ty: f64) -> String {
-	match key {
-		"transform" | "gradientTransform" | "patternTransform" => affine_transform(val, s, tx, ty),
-		"d" => affine_path_data(val, s, tx, ty),
-		"points" => affine_points(val, s, tx, ty),
-		"stroke-dasharray" | "dx" | "dy" => scale_len_list(val, s),
-		"x" | "cx" | "x1" | "x2" | "fx" => affine_length(val, s, tx),
-		"y" | "cy" | "y1" | "y2" | "fy" => affine_length(val, s, ty),
-		"width" | "height" | "r" | "rx" | "ry" | "stroke-width" | "stroke-dashoffset"
-		| "font-size" => scale_length(val, s),
-		_ => val.to_string(),
-	}
-}
-
-fn affine_points(v: &str, s: f64, tx: f64, ty: f64) -> String {
-	parse_num_list(v)
-		.chunks(2)
-		.map(|c| {
-			if c.len() == 2 {
-				format!("{} {}", fmt_num(s * c[0] + tx), fmt_num(s * c[1] + ty))
-			} else {
-				fmt_num(s * c[0] + tx)
-			}
-		})
-		.collect::<Vec<_>>()
-		.join(" ")
-}
-
-/// Conjugate a `transform` list by the affine `A(p) = s*p + t`: each primitive becomes `A T A^-1`.
-/// translate/rotate keep their kind; scale/skew/matrix become an equivalent `matrix(...)` (their
-/// fixed point moves under translation).
-fn affine_transform(v: &str, s: f64, tx: f64, ty: f64) -> String {
-	let mut out = String::new();
-	let mut rest = v;
-	loop {
-		let trimmed = rest.trim_start_matches([' ', ',', '\t', '\n', '\r']);
-		if trimmed.is_empty() {
-			break;
-		}
-		let Some(open) = trimmed.find('(') else {
-			out.push_str(trimmed);
-			break;
-		};
-		let Some(close) = trimmed[open + 1..].find(')') else {
-			out.push_str(trimmed);
-			break;
-		};
-		let name = trimmed[..open].trim();
-		let args = parse_num_list(&trimmed[open + 1..open + 1 + close]);
-		if !out.is_empty() {
-			out.push(' ');
-		}
-		out.push_str(&conjugate(name, &args, s, tx, ty));
-		rest = &trimmed[open + 1 + close + 1..];
-	}
-	out
-}
-
-fn conjugate(name: &str, args: &[f64], s: f64, tx: f64, ty: f64) -> String {
-	let g = |i: usize, d: f64| args.get(i).copied().unwrap_or(d);
-	match name {
-		"translate" => {
-			let (dx, dy) = (g(0, 0.0), g(1, 0.0));
-			format!("translate({} {})", fmt_num(s * dx), fmt_num(s * dy))
-		}
-		"rotate" => {
-			// center is a position -> full affine (default origin -> t).
-			let (a, cx, cy) = (g(0, 0.0), g(1, 0.0), g(2, 0.0));
-			format!(
-				"rotate({} {} {})",
-				fmt_num(a),
-				fmt_num(s * cx + tx),
-				fmt_num(s * cy + ty)
-			)
-		}
-		"scale" => {
-			let a = g(0, 1.0);
-			let b = g(1, a);
-			matrix_str(a, 0.0, 0.0, b, (1.0 - a) * tx, (1.0 - b) * ty)
-		}
-		"skewX" => {
-			let c = (g(0, 0.0).to_radians()).tan();
-			matrix_str(1.0, 0.0, c, 1.0, -c * ty, 0.0)
-		}
-		"skewY" => {
-			let b = (g(0, 0.0).to_radians()).tan();
-			matrix_str(1.0, b, 0.0, 1.0, 0.0, -b * tx)
-		}
-		"matrix" => {
-			let (a, b, c, d, e, f) = (
-				g(0, 1.0),
-				g(1, 0.0),
-				g(2, 0.0),
-				g(3, 1.0),
-				g(4, 0.0),
-				g(5, 0.0),
-			);
-			let e2 = s * e + (1.0 - a) * tx - c * ty;
-			let f2 = s * f - b * tx + (1.0 - d) * ty;
-			matrix_str(a, b, c, d, e2, f2)
-		}
-		_ => {
-			let joined = args
-				.iter()
-				.map(|a| fmt_num(*a))
-				.collect::<Vec<_>>()
-				.join(" ");
-			format!("{name}({joined})")
-		}
-	}
-}
-
-fn matrix_str(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) -> String {
-	format!(
-		"matrix({} {} {} {} {} {})",
-		fmt_num(a),
-		fmt_num(b),
-		fmt_num(c),
-		fmt_num(d),
-		fmt_num(e),
-		fmt_num(f)
-	)
-}
-
-/// Apply the affine to path `d`: absolute coords get `s*p + t`, relative deltas get `s*p`; arc
-/// rx/ry scale, rotation and flags are preserved.
-fn affine_path_data(d: &str, s: f64, tx: f64, ty: f64) -> String {
-	use svgtypes::{PathParser, PathSegment};
-
-	// Absolute point -> affine; relative point -> scale-only.
-	let pt = |x: f64, y: f64, abs: bool| {
-		if abs {
-			(s * x + tx, s * y + ty)
-		} else {
-			(s * x, s * y)
-		}
-	};
-
-	let mut out = String::new();
-	// A leading `m` is absolute.
-	let mut first = true;
-	for seg in PathParser::from(d) {
-		let Ok(seg) = seg else {
-			return d.to_string();
-		};
-		match seg {
-			PathSegment::MoveTo { abs, x, y } => {
-				let absolute = abs || first;
-				let (x, y) = pt(x, y, absolute);
-				cmd(&mut out, 'M', absolute);
-				out.push_str(&two(x, y));
-			}
-			PathSegment::LineTo { abs, x, y } => {
-				let (x, y) = pt(x, y, abs);
-				cmd(&mut out, 'L', abs);
-				out.push_str(&two(x, y));
-			}
-			PathSegment::HorizontalLineTo { abs, x } => {
-				let x = if abs { s * x + tx } else { s * x };
-				cmd(&mut out, 'H', abs);
-				out.push_str(&fmt_num(x));
-			}
-			PathSegment::VerticalLineTo { abs, y } => {
-				let y = if abs { s * y + ty } else { s * y };
-				cmd(&mut out, 'V', abs);
-				out.push_str(&fmt_num(y));
-			}
-			PathSegment::CurveTo {
-				abs,
-				x1,
-				y1,
-				x2,
-				y2,
-				x,
-				y,
-			} => {
-				let (x1, y1) = pt(x1, y1, abs);
-				let (x2, y2) = pt(x2, y2, abs);
-				let (x, y) = pt(x, y, abs);
-				cmd(&mut out, 'C', abs);
-				out.push_str(&nums(&[x1, y1, x2, y2, x, y]));
-			}
-			PathSegment::SmoothCurveTo { abs, x2, y2, x, y } => {
-				let (x2, y2) = pt(x2, y2, abs);
-				let (x, y) = pt(x, y, abs);
-				cmd(&mut out, 'S', abs);
-				out.push_str(&nums(&[x2, y2, x, y]));
-			}
-			PathSegment::Quadratic { abs, x1, y1, x, y } => {
-				let (x1, y1) = pt(x1, y1, abs);
-				let (x, y) = pt(x, y, abs);
-				cmd(&mut out, 'Q', abs);
-				out.push_str(&nums(&[x1, y1, x, y]));
-			}
-			PathSegment::SmoothQuadratic { abs, x, y } => {
-				let (x, y) = pt(x, y, abs);
-				cmd(&mut out, 'T', abs);
-				out.push_str(&two(x, y));
-			}
-			PathSegment::EllipticalArc {
-				abs,
-				rx,
-				ry,
-				x_axis_rotation,
-				large_arc,
-				sweep,
-				x,
-				y,
-			} => {
-				let (x, y) = pt(x, y, abs);
-				cmd(&mut out, 'A', abs);
-				// The two flags are single digits, not numbers to format.
-				out.push_str(&nums(&[rx * s, ry * s, x_axis_rotation]));
-				out.push(' ');
-				out.push(if large_arc { '1' } else { '0' });
-				out.push(' ');
-				out.push(if sweep { '1' } else { '0' });
-				out.push(' ');
-				out.push_str(&two(x, y));
-			}
-			PathSegment::ClosePath { abs } => cmd(&mut out, 'Z', abs),
-		}
-		first = false;
-		out.push(' ');
-	}
-	out.trim_end().to_string()
-}
-
-fn cmd(out: &mut String, upper: char, abs: bool) {
-	out.push(if abs {
-		upper
-	} else {
-		upper.to_ascii_lowercase()
-	});
-	out.push(' ');
-}
-
-fn two(a: f64, b: f64) -> String {
-	nums(&[a, b])
-}
-
-/// Space-separated `fmt_num` of each value.
-fn nums(vs: &[f64]) -> String {
-	vs.iter().map(|v| fmt_num(*v)).collect::<Vec<_>>().join(" ")
 }
 
 // --- root parsing ----------------------------------------------------------
@@ -865,35 +615,6 @@ mod tests {
 		assert!((c.cx - 0.5).abs() < 1e-6);
 		assert!((c.cy - 0.5).abs() < 1e-6);
 		assert!((c.r - 0.5_f64.sqrt()).abs() < 1e-6);
-	}
-
-	#[test]
-	fn affine_path_absolute_and_relative() {
-		// abs M gets scale+translate; rel l gets scale only.
-		let out = affine_path_data("M10 10 l5 0", 2.0, 3.0, 4.0);
-		assert_eq!(out, "M 23 24 l 10 0");
-	}
-
-	/// A leading `m` is absolute, so it must take the translation;.
-	#[test]
-	fn affine_path_leading_relative_moveto_is_absolute() {
-		let out = affine_path_data("m10 10 l5 0", 2.0, 3.0, 4.0);
-		assert_eq!(out, "M 23 24 l 10 0");
-		let out = affine_path_data("M0 0 m10 10", 2.0, 3.0, 4.0);
-		assert_eq!(out, "M 3 4 m 20 20");
-	}
-
-	#[test]
-	fn affine_transform_translate_and_rotate() {
-		assert_eq!(
-			affine_transform("translate(5 5)", 2.0, 3.0, 4.0),
-			"translate(10 10)"
-		);
-		// rotate about origin -> rotate about t.
-		assert_eq!(
-			affine_transform("rotate(90)", 2.0, 3.0, 4.0),
-			"rotate(90 3 4)"
-		);
 	}
 
 	#[test]
@@ -972,5 +693,34 @@ mod tests {
 		assert!((cx2 - 50.0).abs() < 1.0, "cx {cx2}");
 		assert!((cy2 - 50.0).abs() < 1.0, "cy {cy2}");
 		assert!((r2 - 50.0).abs() < 1.5, "r {r2}");
+	}
+
+	/// oxvg rounds coordinates, so the round fit must survive the optimizer within the same
+	/// tolerance the test above uses. The precision search runs, as it does by default.
+	#[test]
+	fn round_output_survives_optimization() {
+		use crate::svg_optimize::{Opts, Precision};
+
+		let src = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#000"/><rect x="70" y="10" width="10" height="10" fill="#fff"/></svg>"##;
+
+		let rounded = round_str(src, Some(0.0)).unwrap();
+		let out = crate::svg_optimize::maybe_optimize(
+			&rounded.svg,
+			Opts {
+				enabled: true,
+				keep_dimensions: false,
+				precision: Precision::Adaptive { threshold: 0.02 },
+			},
+		)
+		.unwrap()
+		.svg;
+
+		let (fg, _) = strip_background(&out, 0.0, 0.0, 100.0, 100.0).unwrap();
+		let tree = crate::render::load_tree_from_data(fg.as_bytes()).unwrap();
+		let (cx, cy, r) = shape_enclosing_circle(&tree, 0.0, 0.0, 100.0, 100.0).unwrap();
+
+		assert!((cx - 50.0).abs() < 1.0, "cx {cx}");
+		assert!((cy - 50.0).abs() < 1.0, "cy {cy}");
+		assert!((r - 50.0).abs() < 1.5, "r {r}");
 	}
 }

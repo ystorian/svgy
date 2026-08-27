@@ -1,6 +1,6 @@
 [package]
 name = "svgy"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Convert an SVG to optimized icons for all platforms"
@@ -31,14 +31,12 @@ clap = { version = "4.6", features = ["derive"] }
 # resvg: `text` is off on purpose.
 resvg = { version = "0.48", default-features = false, features = ["raster-images"] }
 oxipng = { version = "10.2", features = ["parallel", "zopfli"], default-features = false }
+oxvg_optimiser = { version = "0.0.7", default-features = false }
+oxvg_ast = { version = "0.0.7", features = ["roxmltree"] }
+# oxvg_path: `Tolerance` sets the path precision and `oxvg_optimiser` does not re-export it.
+oxvg_path = "0.0.7"
 quick-xml = "0.42"
 svgtypes = "0.16"
-
-[dev-dependencies]
-# `tests/bench.rs` sweeps oxipng settings itself: svgy is a binary, so a test cannot reach
-# `src/optimize.rs`. Kept at the same version and features as the dependency above, otherwise the
-# bench would not measure what the binary does.
-oxipng = { version = "10.2", features = ["parallel", "zopfli"], default-features = false }
 
 [profile.release]
 opt-level = "z"

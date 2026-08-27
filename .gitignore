@@ -35,3 +35,4 @@ node_modules/
 .justcache/
 
 # Additional files and directories for this repository:
+tests/result/**

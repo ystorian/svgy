@@ -4,6 +4,7 @@
 // b, c), and spelling those out obscures more than it helps.
 #![allow(clippy::many_single_char_names, clippy::similar_names)]
 
+mod affine;
 mod cli;
 mod icns;
 mod ico;
@@ -11,10 +12,16 @@ mod numeric;
 mod optimize;
 mod render;
 mod round;
+mod svg_gradient;
+mod svg_id;
+mod svg_mix;
+mod svg_namespace;
+mod svg_optimize;
 mod svg_resize;
+mod svg_style;
 mod svg_text;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use cli::{Cli, ROUND_SUFFIX};
 use resvg::usvg;
@@ -29,6 +36,13 @@ fn main() {
 
 fn run() -> Result<()> {
 	let cli = Cli::parse();
+
+	// `--precision=2` meaning "2 percent" would otherwise silently pick the coarsest output.
+	if let Some(t) = cli.precision
+		&& !(0.0..=1.0).contains(&t)
+	{
+		bail!("--precision must be a fraction between 0.0 and 1.0, got {t}");
+	}
 
 	let src = std::fs::read_to_string(&cli.input)
 		.with_context(|| format!("reading {}", cli.input.display()))?;
@@ -48,12 +62,22 @@ fn run() -> Result<()> {
 	let resized = if cli.no_resize {
 		src
 	} else {
-		svg_resize::transform_svg(&src, cli.size.target_or_default())?
+		let canvas = if cli.no_square {
+			svg_resize::Canvas::Tight
+		} else {
+			svg_resize::Canvas::Padded
+		};
+		svg_resize::transform_svg(&src, cli.size.target_or_default(), canvas)?
 	};
+
+	// One set of settings for both SVG targets: `--no-optimize` covers oxvg as well as oxipng.
+	let svg_opt = svg_optimize::Opts::from_cli(&cli);
 
 	if let Some(dest) = cli.svg_target() {
 		let out = resolve_output(&cli, dest.as_deref(), &cli.suffix, "svg")?;
-		write(&out, resized.as_bytes())?;
+		let svg = svg_optimize::maybe_optimize(&resized, svg_opt)?;
+		write(&out, svg.svg.as_bytes())?;
+		report_precision(&svg);
 	}
 
 	// One parse shared by every raster target.
@@ -85,7 +109,8 @@ fn run() -> Result<()> {
 	if let Some(dest) = &cli.round {
 		let out = resolve_output(&cli, dest.as_deref(), ROUND_SUFFIX, "svg")?;
 		let r = round::round_str(&resized, cli.padding)?;
-		write(&out, r.svg.as_bytes())?;
+		let svg = svg_optimize::maybe_optimize(&r.svg, svg_opt)?;
+		write(&out, svg.svg.as_bytes())?;
 		let chosen = if r.auto_padding { ", chosen" } else { "" };
 		println!(
 			"  scaled content x{:.4} into r={} circle (padding {}{chosen})",
@@ -93,6 +118,7 @@ fn run() -> Result<()> {
 			numeric::fmt_num(r.radius),
 			numeric::fmt_num(r.padding),
 		);
+		report_precision(&svg);
 	}
 
 	Ok(())
@@ -117,6 +143,21 @@ fn write_png(tree: &usvg::Tree, out: &Path, opt: optimize::Opts) -> Result<()> {
 	std::fs::write(out, &png).with_context(|| format!("writing {}", out.display()))?;
 	println!("Wrote {} ({w}x{h}, {} bytes)", out.display(), png.len());
 	Ok(())
+}
+
+/// Report what the precision search settled on, when it ran.
+fn report_precision(out: &svg_optimize::Optimized) {
+	if let Some(p) = out.precision {
+		// A mix names the range it spans, since only some elements reach the top of it.
+		let level = match out.upgrades {
+			Some(n) => format!("precision 0 to {p} ({n} refined)"),
+			None => format!("precision {p}"),
+		};
+		match out.difference {
+			Some(d) => println!("  {level}, {:.2}% difference", d * 100.0),
+			None => println!("  {level}"),
+		}
+	}
 }
 
 fn write(out: &Path, bytes: &[u8]) -> Result<()> {
@@ -193,24 +234,49 @@ mod tests {
 		);
 	}
 
-	/// `--size` fits the longest side for the SVG and the PNG alike: a 200x100 source becomes
-	/// 1024x512, not a padded 1024x1024.
+	/// `--size` pads the canvas to the square for the SVG and the PNG alike: a 200x100 source
+	/// becomes 1024x1024, with the artwork centered.
 	#[test]
-	fn size_fits_the_longest_side_for_both_outputs() {
+	fn size_pads_to_the_square_for_both_outputs() {
 		let src = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><rect width="200" height="100" fill="#000"/></svg>"##;
-		let resized = svg_resize::transform_svg(src, cli::Target::Square(1024)).unwrap();
+		let resized =
+			svg_resize::transform_svg(src, cli::Target::Square(1024), svg_resize::Canvas::Padded)
+				.unwrap();
+		assert!(resized.contains(r#"viewBox="0 0 1024 1024""#), "{resized}");
+		// The 200x100 artwork is scaled by 5.12 and pushed down by (1024 - 512) / 2.
+		assert!(resized.contains(r#"y="256""#), "{resized}");
+
+		let tree = render::load_tree_from_data(resized.as_bytes()).unwrap();
+		assert_eq!(cmd_png_size(&tree), (1024, 1024));
+	}
+
+	/// `--no-square` fits the canvas to the artwork: the same source stays 1024x512.
+	#[test]
+	fn no_square_keeps_the_aspect_ratio() {
+		let src = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><rect width="200" height="100" fill="#000"/></svg>"##;
+		let resized =
+			svg_resize::transform_svg(src, cli::Target::Square(1024), svg_resize::Canvas::Tight)
+				.unwrap();
 		assert!(resized.contains(r#"viewBox="0 0 1024 512""#));
 
 		let tree = render::load_tree_from_data(resized.as_bytes()).unwrap();
 		assert_eq!(cmd_png_size(&tree), (1024, 512));
 	}
 
-	/// `--width`/`--height` together fit inside the box rather than letterboxing.
+	/// `--width`/`--height` together fit inside the box, and the box is what the output measures.
 	#[test]
-	fn width_and_height_fit_inside_the_box() {
+	fn width_and_height_fill_the_box() {
 		let src = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><rect width="200" height="100" fill="#000"/></svg>"##;
-		let resized = svg_resize::transform_svg(src, cli::Target::Both(300, 300)).unwrap();
+		let resized =
+			svg_resize::transform_svg(src, cli::Target::Both(300, 300), svg_resize::Canvas::Padded)
+				.unwrap();
 		let tree = render::load_tree_from_data(resized.as_bytes()).unwrap();
+		assert_eq!(cmd_png_size(&tree), (300, 300));
+
+		let tight =
+			svg_resize::transform_svg(src, cli::Target::Both(300, 300), svg_resize::Canvas::Tight)
+				.unwrap();
+		let tree = render::load_tree_from_data(tight.as_bytes()).unwrap();
 		assert_eq!(cmd_png_size(&tree), (300, 150));
 	}
 }

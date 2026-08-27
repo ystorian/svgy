@@ -55,17 +55,21 @@ With one input file, preferrably a square SVG, **svgy** can generate many icons 
 The command `svgy file.svg` without parameter:
 
 - Resizes the SVG so its longest side is `1024`, by rewriting the `viewBox`.
+- Pads the canvas to a square of `1024` by `1024`, with the artwork centered.
+- Optimizes and minifies the SVG with `oxvg`.
+- Reduces the decimals as far as the artwork allows, keeping the render within `2%` of the source.
 - Saves the SVG with a default suffix as `file.svgy.svg`.
 
 This is equivalent to:
 
 ```shell
-svgy file.svg --svg --suffix=svgy --size=1024
+svgy file.svg --svg --suffix=svgy --size=1024 --precision=0.02
 ```
 
 - `--svg`: Create an SVG.
 - `--suffix=svgy`: Add the suffix `svgy` to the output file name.
 - `--size=1024`: Resize so the longest side is 1024.
+- `--precision=0.02`: Allow the rounded output to differ from the source by up to 2%.
 
 Asking for any target turns the implicit `--svg` off. Add `--svg` explicitly to keep it.
 
@@ -111,7 +115,7 @@ svgy example.svg --round
 ## Output targets
 
 
-- `--svg[=<path>]`: Convert to an optimized and minified SVG.
+- `--svg[=<path>]`: Convert to an optimized and minified SVG, indented with tabs.
 - `--png[=<path>]`: Convert to an optimized PNG.
 - `--ico[=<path>]`: Convert to an optimized Windows icon `.ico`.
 - `--icns[=<path>]`: Convert to an optimized macOS icon `.icns`.
@@ -128,9 +132,14 @@ All sizing parameters are optional, and they all preserve the aspect ratio.
 - `--width=<pixels>`: Resize to the specified **width**.
 - `--height=<pixels>`: Resize to the specified **height**.
 - `--no-resize`: Keep the original dimensions.
+- `--no-square`: Fit the canvas to the artwork instead of padding it to the requested size.
 
 **Notes:**
 - Passing `--width` and `--height` together fits the artwork inside that box.
+- The canvas is padded to the requested size, and the artwork is centered in it. A 620 x 720 source
+  with `--size=1024` gives a `viewBox="0 0 1024 1024"`. Use `--no-square` to get `viewBox="0 0 882
+  1024"`.
+- Padding needs both dimensions, so `--width` or `--height` alone leaves the free axis tight.
 - The sizing parameters `--size`, `--width`, `--height` are mutually exclusive.
 - For icons, non-square source SVGs are resized and centered.
 - Sizing parameters do not apply to `.ico` and `.icns` since they have fixed size sets.
@@ -158,9 +167,11 @@ All sizing parameters are optional, and they all preserve the aspect ratio.
 
 ## Behaviour
 
-- **Order of operations**: read -> strip text -> resize -> round -> write each target. Rounding runs
-  last, inside whatever canvas `--size` set, and the raster targets are rendered from the resized
-  SVG.
+- **Order of operations**: read -> strip text -> resize -> round -> optimize -> write each target.
+  Rounding runs last, inside whatever canvas `--size` set, and the raster targets are rendered from
+  the resized SVG, before optimization.
+- **The precision search only changes the SVG.** `--png`, `--ico` and `--icns` are rendered from the
+  document before optimization, so their pixels never pay for a smaller SVG.
 - **`--round` is a target** `svgy logo.svg --round --icns` writes a round SVG _and a normal
   `.icns`_, the icon is not round-fitted. For round icons, run svgy twice and feed it the round SVG.
 - **Text is removed.** `<text>` and its children are stripped from the source before anything else
@@ -176,8 +187,19 @@ All sizing parameters are optional, and they all preserve the aspect ratio.
 
 ## Other options
 
-- `--no-optimize`: Skip PNG optimization. Optimization dominates the runtime of an `.icns` or
-  `.ico`, so this is the flag to reach for when iterating.
+- `--precision[=<FRACTION>]`: Difference allowed between the optimized SVG and the source, as a
+  fraction of the render. `0.02` by default, and bare `--precision` means the same. svgy optimizes
+  at each precision from 0 to 5 decimals, renders both the source and the candidate at 1024 x 1024,
+  and keeps the first candidate whose difference fits the budget. It then writes each element at its
+  own precision when that saves bytes and still fits the budget, and prints the range it used, such
+  as `precision 0 to 1 (6 refined)`. Expect the difference to come closer to the budget, since the
+  mix spends what one precision for the whole document leaves unspent. This costs up to six renders
+  for the search and up to 32 more for the mix, under a second in practice. If no precision fits,
+  svgy warns and writes the output at 3 decimals.
+- `--no-precision`: Skip the search and write at a fixed 3 decimals.
+- `--no-optimize`: Skip optimization. SVG output skips `oxvg`, and `.png`, `.ico` and `.icns` skip
+  `oxipng`. Optimization dominates the runtime of an `.icns` or `.ico`, so this is the flag to reach
+  for when iterating.
 - `--zopfli`: Compress every PNG with Zopfli. Saves a 1~5% more, but takes 100x more time (minutes
   instead of seconds).
 - `--no-legacy-ico`: Skip the 256-color entries in the Windows icon, keeping only the PNG ones.
@@ -208,8 +230,8 @@ Not implemented yet. Documented here so the intended surface is on record.
 
 - `--in-place`: Overwrite the source `.svg`. SVG output only. Warning: this is a destructive
   parameter.
-- `--keep-ids`: Keep SVG IDs, for example `<path id="this-is-kept">`. Depends on SVG optimization,
-  below, since nothing strips IDs until that ships.
+- `--keep-ids`: Keep SVG IDs, for example `<path id="this-is-kept">`. svgy shortens IDs and drops
+  the unreferenced ones today, and this parameter turns both off.
 - `--round-anchor=<shape|canvas>`: Whether `--round` recenters the artwork on the canvas (`canvas`,
   the default and current behaviour) or scales it in place, leaving its center where it is
   (`shape`).
@@ -224,11 +246,8 @@ Not implemented yet. Documented here so the intended surface is on record.
 
 ### Optimization
 
-SVG optimization. Until it ships, an SVG output is resized but not optimized. When it lands,
-`--no-optimize` will skip it too, so the flag keeps its meaning.
-
-IDs referenced from the document (`url(#gradient)`, `href="#clip"`, and the like) will never be
-stripped, whether or not `--keep-ids` is passed; the flag governs the unreferenced ones.
+IDs referenced from the document (`url(#gradient)`, `href="#clip"`, and the like) are never
+stripped, whether or not `--keep-ids` is passed; the parameter governs the unreferenced ones.
 
 ## References
 
@@ -316,25 +335,115 @@ Installation path:
 ### Pipelines
 
 - SVG: rewrite the root `viewBox` -> multiply the scale into every coordinate in place -> round
-  coordinates to 6 decimals
+  coordinates to 6 decimals -> optimize with oxvg -> search for the lowest precision
 - ROUND: measure the artwork's minimum enclosing circle (background fills excluded) -> bake the
-  scale and translation that map it onto the inscribed circle into every coordinate
+  scale and translation that map it onto the inscribed circle into every coordinate -> optimize with
+  oxvg -> search for the lowest precision
 - PNG: render with resvg -> optimize with oxipng
 - ICO: render each size with resvg -> encode PNG -> optimize with oxipng -> embed verbatim, plus a
   median-cut 256-color BMP for 16 x 16 and 32 x 32
 - ICNS: render each size with resvg -> 16 and 32 to straight-alpha ARGB with PackBits RLE, larger
   sizes to PNG -> optimize with oxipng -> embed verbatim
 
-Resizing adds no `transform`: a uniform scale is origin-independent and commutes with rotation, so
-multiplying it into each coordinate renders identically to the source while preserving the original
-element structure. Existing transforms are rewritten in place rather than flattened.
+Resizing adds no `transform`: the scale and the centering offset are multiplied into each
+coordinate, which renders identically to the source while preserving the original element structure.
+Existing transforms are rewritten in place rather than flattened, and a `<symbol>` or any other
+template a `<use>` instantiates keeps its own coordinates, since the instance carries the offset.
+The output `viewBox` always starts at `0 0`. This describes the resize step alone. The optimizer
+that runs after it is free to restructure the document, and it can move a shared `transform` onto a
+group.
+
+Every SVG goes through `oxvg` with its default job set. Element structure is indented with tabs and
+attribute values are minified, so the output stays readable. `removeDimensions` is on, except under
+`--no-resize`, where the `width` and `height` are the source's own and are kept.
+
+Three jobs are added to the default set:
+
+- `removeXlink` writes `xlink:href` as the native `href`, which also frees the `xmlns:xlink`
+  declaration.
+- `removeAttrs` drops `xml:space`. Text is removed before the optimizer, so nothing is left for
+  `xml:space` to act on, and it stops the serializer from indenting the document.
+- `convertStyleToAttrs` moves a `style` declaration to a presentation attribute, which
+  `removeUnknownsAndDefaults` then drops when it repeats the default.
+
+Five cleanups of svgy frame those jobs.
+
+The `id` of the root element is removed first, when nothing in the document names it.
+`removeUselessStrokeAndFill` stops at an element that carries an `id`, and the root carries every
+other element, so one dead `id` keeps every useless `stroke="none"` in the document.
+
+A gradient that only lends its stops is written into the gradient that borrows them next. Editors
+write a paint as a pair: one `<linearGradient>` holds the stops, and a second one holds the
+coordinates and names the first with an `href`. The pair is one gradient written twice, so it
+becomes one element, which saves the wrapper of the lender and the reference, about 37 bytes a pair.
+
+The move needs the lender to stand alone: a second borrower would need the stops copied, which is
+not always shorter, and a `fill` that names the lender would lose its paint. The two gradients need
+not be of the same kind, which editors often write: a gradient inherits only the attributes that its
+own kind reads, so the move leaves the coordinates of the other kind behind. A `<radialGradient>`
+reads no `x1`, and a `<linearGradient>` no `cx`. No `oxvg` job does any of this, and
+`convertOneStopGradients` only handles a gradient with a single stop.
+
+A `gradientTransform` is folded into the coordinates of its gradient next. The color of a
+`<linearGradient>` is an affine function of the point, and an affine function stays affine through
+an affine map, so every invertible transform folds into its two ends. A `<radialGradient>` also
+carries a circle, and only a translation, a rotation and a uniform scale keep a circle a circle. A
+skew or an axis-dependent scale makes an ellipse, which `r` cannot express. That transform stays,
+and so does one on a coordinate given as a percentage, or on an absent coordinate (a percentage by
+default).
+
+An opacity written in a `style` attribute then keeps three decimals. `cleanup_numeric_values` reads
+attributes, and `stop-opacity` maps to no attribute that `convertStyleToAttrs` can write, so an
+editor value such as `stop-opacity:0.98039216` reaches the output whole. An opacity holds a fraction
+of 0 to 1, where three decimals name every step the eye can tell apart. A length keeps its decimals,
+since the precision search is what decides those.
+
+A namespace declaration that no element or attribute name uses is removed last. Editors leave
+declarations such as `xmlns:svg` behind, and the `oxvg` serializer repeats them on every element.
+The default `xmlns` always stays.
+
+A `<style>` or a `<script>` decides what an element looks like in a way that reading the attributes
+cannot follow. Such a document keeps its `style` attributes and its root `id`.
+
+The job list then runs again, up to three times in all. Each job runs once per run, in a fixed
+order, and the jobs that merge segments run before the jobs that round the numbers. Rounding can
+make two segments collinear, which the merge that already ran can no longer see. The next run reads
+what the run before it wrote and takes the merge. A run that writes no fewer bytes than the run
+before it is dropped, since `convertPathData` can trade a curve for a longer arc. Every test file
+settles after the second run.
+
+One number then drives the five `oxvg` rounding settings, and svgy searches for the lowest one that
+still looks right. `convertPathData` dominates the result, since most of an icon is path data. The
+error grows as the precision drops, so the first precision that fits the budget is also the smallest
+one that fits. `mergePaths` keeps a tolerance of its own that the search cannot reach, which is why
+a small difference remains even at the highest precision.
+
+Artwork already drawn on whole numbers reaches 0 decimals with no difference at all. Detailed
+artwork settles higher. Expect `--round` to land a decimal higher than `--svg` on the same source,
+because rounding has already rescaled the coordinates off whole numbers.
+
+One precision for the whole document gives every element the decimals that the worst element needs,
+which leaves budget unspent. svgy then mixes the candidates it has already built: every element
+starts at the lowest precision, and the elements that need decimals buy them back one at a time. The
+output reports the range it spans, such as `precision 0 to 1 (6 refined)`.
+
+Which element to refine next is an estimate, and only the order of the tries rests on it. A rounded
+coordinate moves an edge sideways, so the estimate is the length of the outline that moves, divided
+by the bytes another decimal costs. A gradient has no outline and goes last. Every try is then
+rendered, and the budget decides, so a poor estimate costs bytes and never accuracy.
+
+A mix needs the candidates to hold the same document, since it moves attributes between them. The
+element names, the nesting, the attribute names, and every `id`, `href` and `class` must match. A
+job such as `mergePaths` can restructure the document differently at another precision, and svgy
+then keeps what the search chose. It also keeps that document when no mix reaches the budget, or
+when the mix saves nothing.
+
+The mix spends the budget you name, so expect the reported difference to rise towards it. Pass a
+smaller `--precision` to buy the accuracy back.
 
 Every PNG goes through `oxipng` at preset **4**, with alpha optimization on. Pass `--zopfli` to use
 the Zopfli deflater, this saves 1~5% more, 2% on average, but this requires minutes instead of
 seconds. Pass `--no-optimize` to skip optimization entirely.
-
-
-entirely.
 
 ## Requirements
 

@@ -3,18 +3,20 @@
 use clap::{Args, Parser};
 use std::path::PathBuf;
 
-/// Default longest-side length when no sizing parameter is given.
+/// Default size (1024 x 1024).
 pub const DEFAULT_SIZE: u32 = 1024;
 
-/// Suffix used for output names when no destination is given.
+/// Default suffix when the output is not specified.
 pub const DEFAULT_SUFFIX: &str = "svgy";
 
-/// Suffix used for `--round`, so it never collides with `--svg`.
+/// Suffix used for `--round`.
 pub const ROUND_SUFFIX: &str = "round";
 
-/// Padding applied to `--round` when the flag is given without a value, and
-/// when the source turns out to have a full-canvas background.
+/// Default padding applied to `--round` when the SVG has full-canvas background.
 pub const DEFAULT_ROUND_PADDING: f64 = 0.1;
+
+/// Difference budget for the precision search, `0.02`= 2%.
+pub const DEFAULT_PRECISION_THRESHOLD: f64 = 0.02;
 
 #[derive(Parser)]
 #[command(
@@ -31,19 +33,23 @@ pub struct Cli {
 	/// Input SVG file
 	pub input: PathBuf,
 
-	/// Write an SVG (the default when no other target is given)
+	/// Write an SVG (default when no other target is given).
 	#[arg(long, value_name = "PATH", num_args = 0..=1, require_equals = true)]
 	pub svg: Option<Option<PathBuf>>,
-	/// Write a PNG
+
+	/// Write a PNG.
 	#[arg(long, value_name = "PATH", num_args = 0..=1, require_equals = true)]
 	pub png: Option<Option<PathBuf>>,
-	/// Write a Windows icon
+
+	/// Write a Windows icon.
 	#[arg(long, value_name = "PATH", num_args = 0..=1, require_equals = true)]
 	pub ico: Option<Option<PathBuf>>,
-	/// Write a macOS icon
+
+	/// Write a macOS icon.
 	#[arg(long, value_name = "PATH", num_args = 0..=1, require_equals = true)]
 	pub icns: Option<Option<PathBuf>>,
-	/// Write an SVG whose artwork is fitted inside the inscribed circle
+
+	/// Write an SVG resized to fit in a circle.
 	#[arg(long, value_name = "PATH", num_args = 0..=1, require_equals = true)]
 	pub round: Option<Option<PathBuf>>,
 
@@ -60,6 +66,20 @@ pub struct Cli {
 	)]
 	pub padding: Option<f64>,
 
+	/// Budget for the precision search, as a fraction (0.0..1.0) of the source render
+	#[arg(
+		long,
+		value_name = "FRACTION",
+		num_args = 0..=1,
+		require_equals = true,
+		default_missing_value = "0.02"
+	)]
+	pub precision: Option<f64>,
+
+	/// Keep the fixed precision of the optimizer instead of searching for the lowest one
+	#[arg(long = "no-precision")]
+	pub no_precision: bool,
+
 	/// Suffix used when a destination is not specified
 	#[arg(long, default_value = DEFAULT_SUFFIX)]
 	pub suffix: String,
@@ -67,6 +87,10 @@ pub struct Cli {
 	/// Keep the original dimensions
 	#[arg(long = "no-resize")]
 	pub no_resize: bool,
+
+	/// Fit the canvas to the artwork instead of padding it to the requested size
+	#[arg(long = "no-square")]
+	pub no_square: bool,
 
 	/// Skip oxipng optimization
 	#[arg(long = "no-optimize")]
@@ -113,6 +137,19 @@ pub enum Target {
 	Height(u32),
 	/// Fit inside W x H.
 	Both(u32, u32),
+}
+
+impl Target {
+	/// The canvas the target asks for, per axis. `None` means the axis is free: only one dimension
+	/// was given, so the other follows the aspect ratio and cannot be padded to a known size.
+	pub fn canvas(self) -> (Option<f64>, Option<f64>) {
+		match self {
+			Target::Square(n) => (Some(f64::from(n)), Some(f64::from(n))),
+			Target::Width(w) => (Some(f64::from(w)), None),
+			Target::Height(h) => (None, Some(f64::from(h))),
+			Target::Both(w, h) => (Some(f64::from(w)), Some(f64::from(h))),
+		}
+	}
 }
 
 #[derive(Args, Clone, Copy)]
@@ -196,6 +233,34 @@ mod tests {
 		assert_eq!(cli.padding, Some(0.25));
 		let cli = parse(&["svgy", "logo.svg", "--round"]);
 		assert_eq!(cli.padding, None);
+	}
+
+	#[test]
+	fn bare_precision_is_the_default_threshold() {
+		let cli = parse(&["svgy", "logo.svg", "--precision"]);
+		assert_eq!(cli.precision, Some(DEFAULT_PRECISION_THRESHOLD));
+		let cli = parse(&["svgy", "logo.svg", "--precision=0.005"]);
+		assert_eq!(cli.precision, Some(0.005));
+		let cli = parse(&["svgy", "logo.svg"]);
+		assert_eq!(cli.precision, None);
+	}
+
+	/// The search runs unless it is turned off, and then the budget is irrelevant.
+	#[test]
+	fn the_search_runs_unless_no_precision_is_given() {
+		use crate::svg_optimize::{Opts, Precision};
+
+		let cli = parse(&["svgy", "logo.svg"]);
+		assert!(matches!(
+			Opts::from_cli(&cli).precision,
+			Precision::Adaptive { threshold } if threshold == DEFAULT_PRECISION_THRESHOLD
+		));
+
+		let cli = parse(&["svgy", "logo.svg", "--no-precision"]);
+		assert!(matches!(Opts::from_cli(&cli).precision, Precision::Default));
+
+		let cli = parse(&["svgy", "logo.svg", "--no-precision", "--precision=0.5"]);
+		assert!(matches!(Opts::from_cli(&cli).precision, Precision::Default));
 	}
 
 	/// Zopfli is opt-in.
