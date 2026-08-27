@@ -56,18 +56,6 @@ pub fn parse_num_list(v: &str) -> Vec<f64> {
 		.collect()
 }
 
-/// Scale every number in a list (e.g. polygon `points`) by `s`.
-pub fn scale_num_list(v: &str, s: f64) -> String {
-	v.split([',', ' ', '\t', '\n', '\r'])
-		.filter(|t| !t.is_empty())
-		.map(|t| match t.parse::<f64>() {
-			Ok(n) => fmt_num(n * s),
-			Err(_) => t.to_string(),
-		})
-		.collect::<Vec<_>>()
-		.join(" ")
-}
-
 /// Scale a list of lengths (e.g. `stroke-dasharray`) by `s`.
 pub fn scale_len_list(v: &str, s: f64) -> String {
 	v.split([',', ' ', '\t', '\n', '\r'])

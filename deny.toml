@@ -1,9 +1,18 @@
 # deny.toml
-# Last refresh: 2026-02-10
+# Last refresh: 2026-08-26
 
 [licenses]
 version = 2
-allow = ["Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "MIT", "Unicode-3.0"]
+allow = [
+	"Apache-2.0",
+	"BSD-2-Clause",
+	"BSD-3-Clause",
+	"ISC",
+	"MIT",
+	"MPL-2.0",
+	"Unicode-3.0",
+	"Zlib",
+]
 
 [advisories]
-ignore = []
+unmaintained = 'workspace'
