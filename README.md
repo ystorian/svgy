@@ -167,7 +167,7 @@ All sizing parameters are optional, and they all preserve the aspect ratio.
 
 ## Behaviour
 
-- **Order of operations**: read -> strip text -> resize -> round -> optimize -> write each target.
+- **Order of operations**: read -> check images -> strip text -> resize -> round -> optimize -> write each target.
   Rounding runs last, inside whatever canvas `--size` set, and the raster targets are rendered from
   the resized SVG, before optimization.
 - **The precision search only changes the SVG.** `--png`, `--ico` and `--icns` are rendered from the
@@ -179,6 +179,11 @@ All sizing parameters are optional, and they all preserve the aspect ratio.
   `--png`, `--ico` and `--icns`, and `--round` fits the circle to what remains. svgy prints a
   warning when it removes text. Convert text to paths before converting the icon. In Inkscape,
   select the text and use **Path > Object to Path** (`Shift+Ctrl+C`).
+- **An `<image>` stops the run.** svgy converts vector artwork. A bitmap does not render, so it
+  would stay in the `--svg` output and be missing from `--png`, `--ico` and `--icns`, and `--round`
+  would fit the circle to the rest. Trace the image to paths first, or pass `--strip-images` to
+  remove the element and convert what remains. This covers every `<image>`, whether its `href`
+  holds a data URI, a file path or an SVG.
 - **One input at a time.** Globs and multiple inputs are not supported; use a shell loop.
 - **Missing directories are created.** A destination may name a subdirectory that does not exist
   yet, as the icons example above does.
@@ -204,6 +209,8 @@ All sizing parameters are optional, and they all preserve the aspect ratio.
   instead of seconds).
 - `--no-legacy-ico`: Skip the 256-color entries in the Windows icon, keeping only the PNG ones.
   Saves about 3.6 KiB, at the cost of dropping support for 256-color sessions and pre-Vista shells.
+- `--strip-images`: Remove every `<image>` element and convert the vector artwork that remains,
+  instead of stopping. svgy prints a warning when it removes one.
 
 ## Planned
 

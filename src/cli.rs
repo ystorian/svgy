@@ -103,6 +103,10 @@ pub struct Cli {
 	/// Skip the 256-color BMP entries for 16x16 and 32x32
 	#[arg(long = "no-legacy-ico")]
 	pub no_legacy: bool,
+
+	/// Remove every <image> element instead of stopping
+	#[arg(long = "strip-images")]
+	pub strip_images: bool,
 }
 
 impl Cli {
