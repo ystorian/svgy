@@ -6,14 +6,14 @@ on:
   push:
     tags:
       - v*
-  # Allow a manual run to test the build matrix, without signing or publishing anything.
+  # Allow manual run to test without signing or publishing anything.
   workflow_dispatch:
 
 permissions: {}
 
 concurrency:
-  # Never cancel a release in flight.
   group: ${{ github.workflow }}-${{ github.ref }}
+  # Don't cancel a release in flight.
   cancel-in-progress: false
 
 env:
@@ -60,7 +60,7 @@ jobs:
           echo "Cargo.toml version: ${version}"
           echo "Tag: ${TAG}"
           if [ "v${version}" != "${TAG}" ]; then
-            echo "::error::The tag ${TAG} does not match the Cargo.toml version ${version}."
+            echo "::error::The tag ${TAG} does not match Cargo.toml version ${version}."
             exit 1
           fi
 
@@ -220,8 +220,6 @@ jobs:
           merge-multiple: true
 
       - name: Install minisign
-        # The pinned upstream release ships static binaries for x86_64 and aarch64, and the checksum
-        # is verified, so the signing step does not depend on a distribution package.
         run: |
           curl -fsSL -o minisign.tar.gz \
             "https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz"
@@ -244,8 +242,19 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           umask 077
-          printf '%s\n' "$MINISIGN_SECRET_KEY" > signing.key
-          trap 'rm -f signing.key' EXIT
+          trap 'rm -f signing.key signing.key.tmp' EXIT
+          printf '%s\n' "$MINISIGN_SECRET_KEY" | tr -d '\r' | grep -v '^[[:space:]]*$' > signing.key
+          if [ "$(wc -l < signing.key)" -eq 1 ]; then
+            {
+              printf 'untrusted comment: minisign encrypted secret key\n'
+              cat signing.key
+            } > signing.key.tmp
+            mv signing.key.tmp signing.key
+          fi
+          if [ "$(wc -l < signing.key)" -ne 2 ]; then
+            echo "::error::MINISIGN_SECRET_KEY is not a minisign secret key file."
+            exit 1
+          fi
           for file in dist/svgy-* dist/SHA256SUMS; do
             printf '%s\n' "$MINISIGN_PASSWORD" \
               | minisign -S -s signing.key -m "$file" -x "${file}.sig" \
@@ -253,8 +262,6 @@ jobs:
           done
 
       - name: Verify the signatures against the public key in Cargo.toml
-        # Guards against a signing key that no longer matches the key `cargo binstall` reads
-        # from the published crate.
         run: |
           pubkey="$(awk -F'"' '/^pubkey[[:space:]]*=/ { print $2; exit }' Cargo.toml)"
           for file in dist/svgy-* dist/SHA256SUMS; do
@@ -289,7 +296,7 @@ jobs:
           echo "draft=$DRAFT_RESULT build=$BUILD_RESULT sign=$SIGN_RESULT"
           for result in "$DRAFT_RESULT" "$BUILD_RESULT" "$SIGN_RESULT"; do
             if [ "$result" != "success" ]; then
-              echo "::error::A release job failed or was cancelled, the release stays a draft."
+              echo "::error::A release job failed or was cancelled, release stays at draft."
               exit 1
             fi
           done
@@ -302,17 +309,16 @@ jobs:
         run: gh release edit "$TAG" --draft=false --latest
 
 
-  # Publish to crates.io last: the `binstall` metadata of the crate points at the release assets, so
-  # they must be publicly reachable before the crate version exists.
+  # Publish to crates.io.
   publish-crate:
     name: Publish to crates.io
     needs: publish-release
     runs-on: ubuntu-26.04-arm
-    # Named in the crates.io trusted publisher configuration.
+    # crates.io Trusted Publishing environment.
     environment: release
     permissions:
       contents: read
-      id-token: write # Mint the crates.io token through trusted publishing.
+      id-token: write # OpenID Connect token for crates.io Trusted Publishing.
 
     steps:
       - name: Checkout the source

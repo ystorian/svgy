@@ -35,3 +35,4 @@ _release: &release
 # CI: rebuild on any source change.
 ci:
   - *common
+  - "!tests/**"

@@ -1,0 +1,14 @@
+{
+  "optimise": {
+    "extends": "default",
+    "jobs": {
+      "removeDimensions": true,
+      "removeXlink": {},
+      "convertStyleToAttrs": {},
+      "removeAttrs": {
+        "elemSeparator": "|",
+        "attrs": ["*|xml:space"]
+      }
+    }
+  }
+}

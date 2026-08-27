@@ -47,7 +47,7 @@ set_title(title) := f'\033]0;{{ title }}\07'
 ## Files
 
 # Get a file size.
-file_size(file) := trim(shell('wc -c < "$1"', file))
+file_size(file) := if path_exists(file) { trim(shell('wc -c < "$1"', file)) } else { '? ' + file }
 
 ## Git
 
