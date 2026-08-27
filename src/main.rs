@@ -14,6 +14,7 @@ mod render;
 mod round;
 mod svg_gradient;
 mod svg_id;
+mod svg_image;
 mod svg_mix;
 mod svg_namespace;
 mod svg_optimize;
@@ -46,6 +47,23 @@ fn run() -> Result<()> {
 
 	let src = std::fs::read_to_string(&cli.input)
 		.with_context(|| format!("reading {}", cli.input.display()))?;
+
+	// A bitmap cannot be rendered and cannot be converted to paths, so the document is rejected
+	// before any work is done on it, unless the caller asks for the image to be dropped.
+	let (stripped, had_images) = svg_image::strip_images(&src)?;
+	let src = if had_images {
+		if !cli.strip_images {
+			bail!(
+				"<image> is not supported: svgy converts vector artwork, and an image would be \
+				 missing from the PNG, ICO and ICNS output. Trace it to paths first, or pass \
+				 --strip-images to remove it."
+			);
+		}
+		eprintln!("Warning: <image> is not supported and was removed.");
+		stripped
+	} else {
+		src
+	};
 
 	// Text cannot be rendered, so it is removed before anything else looks at the
 	// document: every target then agrees on what the artwork is.

@@ -1,8 +1,7 @@
 [package]
 name = "svgy"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
-rust-version = "1.88"
 description = "Convert an SVG to optimized icons for all platforms"
 license = "MIT OR Apache-2.0"
 authors = ["Flavien Scheurer <flavien+svgy@ystorian.com>"]
@@ -28,8 +27,8 @@ pubkey = "RWRukfafJ1oiG5PP1IKXRgoI7ntXPbys8WUm9ol6oanMKxEtXdbXisri"
 [dependencies]
 anyhow = "1"
 clap = { version = "4.6", features = ["derive"] }
-# resvg: `text` is off on purpose.
-resvg = { version = "0.48", default-features = false, features = ["raster-images"] }
+# resvg: `text` and `raster-images` are off on purpose. svgy stops on an `<image>` element.
+resvg = { version = "0.48", default-features = false }
 oxipng = { version = "10.2", features = ["parallel", "zopfli"], default-features = false }
 oxvg_optimiser = { version = "0.0.7", default-features = false }
 oxvg_ast = { version = "0.0.7", features = ["roxmltree"] }
