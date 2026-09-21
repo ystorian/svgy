@@ -11,28 +11,35 @@
 # - it's not possible to re-include a file with a positive pattern
 # - exclude only the files to skip, tipically docs and dev config files
 
-# Common exclusions, ignored in all actions.
+# Common exclusions, changes in these files are ignored in all actions.
 _common: &common
   - "**" # Must begin with `**`.
+  # Markdown.
   - "!**.md"
-  - "!.clippy.toml"
-  - "!.editorconfig"
-  - "!.env*"
-  - "!.githooks/**"
-  - "!.github/filters.yaml"
-  - "!.github/workflows/release.yaml"
+  # Licenses.
+  - "!LICENSE*"
+  # Just recipes.
   - "!justfile"
   - "!.just/**"
-  - "!LICENSE*"
+  # Rust.
+  - "!.clippy.toml"
+  - "!.rustfmt.toml"
+  # Local Docker dev.
+  - "!compose.Dockerfile"
+  - "!compose.yaml"
+  - "!dev.Dockerfile"
+  # Local dev.
+  - "!.githooks/**"
+  - "!.editorconfig"
+  - "!.env*"
   - "!.markdownlint.json"
+  - "!droast.toml"
+  # This file.
+  - "!.github/filters.yaml"
 
-#  Release exclusions, ignored in release actions.
-_release: &release
-  - "!.gitignore"
-  - "!deny.toml"
-  - "!.github/workflows/ci**"
 
 # CI: rebuild on any source change.
+# Used by .github/workflows/ci-rust.yaml
 ci:
   - *common
   - "!tests/**"

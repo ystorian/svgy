@@ -26,6 +26,10 @@ env:
   # Disable incremental compilation for faster from-scratch builds.
   CARGO_INCREMENTAL: 0
 
+  # Link with LLVM's lld-link on Windows, faster than the default linker.
+  CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER: lld-link.exe
+  CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: lld-link.exe
+
   # Pinned minisign release, used by the `sign` job.
   MINISIGN_VERSION: "0.12"
   MINISIGN_SHA256: 9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
@@ -256,9 +260,8 @@ jobs:
             exit 1
           fi
           for file in dist/svgy-* dist/SHA256SUMS; do
-            printf '%s\n' "$MINISIGN_PASSWORD" \
-              | minisign -S -s signing.key -m "$file" -x "${file}.sig" \
-                -t "svgy ${TAG}"
+            printf '%s\n' "$MINISIGN_PASSWORD" | \
+              minisign -S -s signing.key -m "$file" -x "${file}.sig" -t "svgy ${TAG}"
           done
 
       - name: Verify the signatures against the public key in Cargo.toml
