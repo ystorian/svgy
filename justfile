@@ -1,5 +1,8 @@
 # justfile
 
+# Set the minimum Just version.
+set minimum-version := '1.58.0'
+
 # Set the default shell on Windows to `bash` (installed with Git).
 set windows-shell := ['C:\Program Files\Git\bin\bash.exe', '-cu']
 
@@ -27,9 +30,8 @@ import? '.just/git.just'
 import? '.just/github.just'
 import? '.just/utils.just'
 
-# List the commands when called without parameters.
+# List the recipes when called without parameters.
 _:
-	# List recipes.
 	just --list
 
 ## Project specifics.

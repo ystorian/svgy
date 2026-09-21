@@ -215,6 +215,7 @@ lint_just:
 [group('Utils')]
 [no-exit-message]
 check_just:
+	echo "{{ dim(['just', BOLD + just_version()]) }}"
 	if ! just --format --check --indentation '{{ "\t" }}' >/dev/null 2>&1; then \
 		echo "{{ error([BOLD + 'justfile', 'is not linted, run', MAGENTA + 'just lint_just']) }}" \
 	;fi
@@ -240,22 +241,20 @@ check_markdown:
 [group('Utils')]
 [macos]
 no_index:
-	echo {{ CYAN }}Disable {{ YELLOW }}Spotlight{{ CYAN }} indexing and \
-	{{ YELLOW }}Time Machine{{ CYAN }} backups on generated files{{ NORMAL }}
+	echo {{ CYAN }}Disable {{ BOLD }}Spotlight indexing{{ NORMAL + CYAN }} and \
+	{{ BOLD }}Time Machine backups{{ NORMAL + CYAN }} on generated files{{ NORMAL }}
 
 	# Dotted directories like ".git" are ignored by SpotLight, but we also exclude them from Time
 	# Machine backups.
 
-	echo {{ dim('Git') }}
+	echo {{ CYAN }}  {{ BOLD }}Git{{ NORMAL }}
 	just no_index_dir .git
 
-	echo {{ dim('Rust') }}
+	echo {{ CYAN }}  {{ BOLD }}Rust{{ NORMAL }}
 	# Global Cargo `git`, assuming it contains `CACHEDIR.TAG`.
 	just no_index_dir "{{ env('CARGO_HOME') + '/git' }}"
-
 	# Global Cargo `registry`, assuming it contains `CACHEDIR.TAG`.
 	just no_index_dir "{{ env('CARGO_HOME') + '/registry' }}"
-
 	# Global Rustup directory.
 	just no_index_dir "{{ env('RUSTUP_HOME') }}"
 
@@ -263,11 +262,13 @@ no_index:
 	just no_index_dir target
 	just no_index_dir data
 
-	echo {{ dim('Javascript') }}
+	echo {{ CYAN }}  {{ BOLD }}Javascript{{ NORMAL }}
 	just no_index_dir node_modules
 
-	echo {{ dim('PHP') }}
+	echo {{ CYAN }}  {{ BOLD }}PHP{{ NORMAL }}
 	just no_index_dir vendor
+
+	echo {{ done('') }}
 
 # Disable Spotlight indexing and Time Machine backups on a directory
 [group('Utils')]
@@ -278,39 +279,21 @@ no_index_dir dir:
 	# Notes:
 	# - `.metadata_never_index` works only on Volumes, delete them.
 	# - `com.apple.metadata:kMDItemSupportFileType` is undocumented.
+
 	if [ ! -d "{{ absolute_path(dir) }}" ]; then \
-		echo "{{ dim([YELLOW + 'Skipping non-existing directory', YELLOW + BOLD + dir]) }}" \
-	;fi
-
-	just delete_file "{{ dir + '/.metadata_never_index' }}"
-
-	[ -d "{{ absolute_path(dir) }}" ] || exit 0; \
-	case "$(xattr \
-		-p com.apple.metadata:kMDItemSupportFileType \
-		"{{ absolute_path(dir) }}" 2>/dev/null)" in \
-		*MDSystemFile*) \
-			echo "{{ dim(['Already excluded', BOLD + dir, 'from Spotlight indexing']) }}" \
-		;; \
-		*) \
-			xattr \
-			-w com.apple.metadata:kMDItemSupportFileType \
-			MDSystemFile \
-			"{{ absolute_path(dir) }}" && \
-			echo "{{ dim(['Excluded', GREEN + BOLD + dir, 'from Spotlight indexing']) }}" \
-		;; \
-	esac
-
-	[ -d "{{ absolute_path(dir) }}" ] || exit 0; \
-	case "$(tmutil \
-		isexcluded \
-		"{{ absolute_path(dir) }}")" in \
-		*'[Excluded]'*) \
-			echo "{{ dim(['Already excluded', BOLD + dir, 'from Time Machine']) }}" \
-		;; \
-		*) \
-			tmutil \
-			addexclusion \
-			"{{ absolute_path(dir) }}" && \
-			echo "{{ dim(['Excluded', GREEN + BOLD + dir, 'from Time Machine']) }}" \
-		;; \
-	esac
+		echo "{{ dim(YELLOW + ITALIC + dir) }}"; \
+		exit 0; \
+	else \
+		just delete_file "{{ dir + '/.metadata_never_index' }}"; \
+		if ! [[ "$(xattr -p com.apple.metadata:kMDItemSupportFileType \
+			"{{ absolute_path(dir) }}")" =~ 'MDSystemFile' ]]; then \
+			xattr -w com.apple.metadata:kMDItemSupportFileType MDSystemFile \
+			"{{ absolute_path(dir) }}"; \
+			echo "{{ dim(GREEN + 'Excluded from Spotlight indexing: ' + BOLD + dir) }}"; \
+		fi; \
+		if [[ "$(tmutil isexcluded "{{ absolute_path(dir) }}")" =~ '[Included]' ]]; then \
+			tmutil addexclusion "{{ absolute_path(dir) }}"; \
+			echo "{{ dim(GREEN + 'Excluded from Time Machine: ' + BOLD + dir) }}"; \
+		fi; \
+		echo "{{ dim(GREEN + dir) }}"; \
+	fi
