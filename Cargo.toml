@@ -1,6 +1,8 @@
+# Cargo.toml
+
 [package]
 name = "svgy"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2024"
 description = "Convert an SVG to optimized icons for all platforms"
 license = "MIT OR Apache-2.0"
