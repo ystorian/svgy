@@ -13,6 +13,9 @@ user := if which("gh") == [] { '' } else { shell("gh api user --jq '.login'") }
 # GitHub auth token.
 github_token := if env('GITHUB_TOKEN', '') != '' { env('GITHUB_TOKEN') } else if which("gh") == [] { '' } else { shell('gh auth token 2>/dev/null || echo ""') }
 
+# Name of the CI job that the status checks ruleset must require.
+status_check := 'Status check'
+
 # Audit actions
 [group('GitHub Actions')]
 [no-exit-message]
@@ -257,6 +260,23 @@ check_rulesets owner=owner repo=repo:
 			missing="$missing $rule"; \
 		fi; \
 	done; \
+	if printf '%s' "$rules" | jq -e 'any(.[]; .type=="required_status_checks")' >/dev/null; then \
+		if printf '%s' "$rules" | jq -e --arg check '{{ status_check }}' \
+			'any(.[]; .type=="required_status_checks" and \
+				any(.parameters.required_status_checks[]?; .context==$check))' >/dev/null; then \
+			echo "{{ dim(['✅', GREEN + BOLD + status_check, 'is a required check']) }}"; \
+		else \
+			echo "{{ dim([NORMAL + RED + '❌' + BOLD + status_check, RED + 'is not a required check']) }}"; \
+			missing="$missing status_check"; \
+		fi; \
+		if printf '%s' "$rules" | jq -e 'any(.[]; .type=="required_status_checks" and \
+			.parameters.strict_required_status_checks_policy==true)' >/dev/null; then \
+			echo "{{ dim(['✅', GREEN + BOLD + 'Branches must be up to date', 'before merging']) }}"; \
+		else \
+			echo "{{ dim([NORMAL + RED + '❌' + BOLD + 'Branches can be out of date', RED + 'before merging']) }}"; \
+			missing="$missing strict_status_checks"; \
+		fi; \
+	fi; \
 	if ! ids=$(gh api repos/{{ owner }}/{{ repo }}/rulesets --jq '.[].id' 2>/dev/null); then \
 		ids=''; \
 	fi; \

@@ -1,4 +1,4 @@
-# .just/cargo.just
+# @template/.just/cargo.just
 
 # Variables.
 
@@ -50,7 +50,7 @@ install_cargo_tools:
 	fi
 
 	echo {{ dim(['Required:', GREEN + required_cargo_tools]) }}
-	echo {{ dim(['Addtional:', YELLOW + additional_cargo_tools]) }}
+	echo {{ dim(['Additional:', YELLOW + additional_cargo_tools]) }}
 
 	cargo-binstall \
 		{{ join_list(binstall_options) }} \
