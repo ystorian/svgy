@@ -1,4 +1,4 @@
-# <img src="https://raw.githubusercontent.com/ystorian/svgy/main/svgy.svg" width="48" align="absmiddle" alt="SVGY logo"> SVGY
+# <img src="https://raw.githubusercontent.com/ystorian/svgy/main/svgy.svg" width="48" align="absmiddle" alt="Svgy logo"> Svgy
 
 **Generate icons from SVG**
 
@@ -6,77 +6,52 @@
 [![Crates.io](https://img.shields.io/crates/v/svgy.svg)](https://crates.io/crates/svgy)
 [![docs.rs](https://docs.rs/svgy/badge.svg)](https://docs.rs/svgy)
 
-Turn one SVG into all the icons a project needs: resized and optimized SVGs, PNGs, Windows `.ico` macOS `.icns`, or all of them in a single pass.
+Make all the icons of a project from one SVG, in one pass: optimized `.svg`, `.png`, Windows `.ico`,
+and macOS `.icns`.
 
 ## Install
 
-### Prebuilt binary
-Install in seconds using signed binary, for Linux, macOS, and Windows, on x64 and arm64:
+Install a signed binary for Linux, macOS, or Windows, on x64 or arm64:
 
 ```shell
 cargo binstall svgy
 ```
 
-### Source
-Install from source using [crates.io](https://crates.io/crates/svgy):
+Or build from [crates.io](https://crates.io/crates/svgy):
 
 ```shell
 cargo install svgy
 ```
 
-### Local
-Install from a clone of this repository:
 
-```shell
-cargo install --path .
-```
-
-### Signatures
-
-Every release archive is signed with [minisign](https://jedisct1.github.io/minisign/). The public
-key is in `Cargo.toml`.
-
-To check an archive downloaded from the releases page:
-
-```shell
-minisign -V -m <source archive> -P <public key>
-```
-
-## Synopsis
+## Usage
 
 ```shell
 svgy <input.svg> [targets] [options]
 ```
 
-With one input file, preferrably a square SVG, **svgy** can generate many icons formats in one pass.
+Use a square SVG for the best result.
 
-## Defaults
+### Defaults
 
-The command `svgy file.svg` without parameter:
+`svgy file.svg` makes `file.svgy.svg`.
 
-- Resizes the SVG so its longest side is `1024`, by rewriting the `viewBox`.
-- Pads the canvas to a square of `1024` by `1024`, with the artwork centered.
-- Optimizes and minifies the SVG with `oxvg`.
-- Reduces the decimals as far as the artwork allows, keeping the render within `2%` of the source.
-- Saves the SVG with a default suffix as `file.svgy.svg`.
+Svgy:
 
-This is equivalent to:
+- Makes the image fit in 1024 x 1024.
+- Puts the artwork in the center of a square.
+- Makes the SVG smaller with `oxvg`.
+- Optimizes further while keeping visual changes below 2%.
+
+This is the same as:
 
 ```shell
 svgy file.svg --svg --suffix=svgy --size=1024 --precision=0.02
 ```
 
-- `--svg`: Create an SVG.
-- `--suffix=svgy`: Add the suffix `svgy` to the output file name.
-- `--size=1024`: Resize so the longest side is 1024.
-- `--precision=0.02`: Allow the rounded output to differ from the source by up to 2%.
+### Examples
 
-Asking for any target turns the implicit `--svg` off. Add `--svg` explicitly to keep it.
-
-## Examples
-
-Create two icons for macOS and Windows in their respective subfolders, and a tiny SVG for the
-favicon in the same directory:
+Make a macOS icon, a Windows icon, and a small SVG favicon:
 
 ```shell
 svgy example.svg --icns=macos/example.icns --ico=windows/example.ico --svg=favicon.svg --size=32
@@ -89,385 +64,59 @@ svgy example.svg --icns=macos/example.icns --ico=windows/example.ico --svg=favic
 >   - `example.ico` _16x16 to 256x256_
 > - `favicon.svg` _32x32_
 
-_Note: `--size` never applies to icons, they keep their fixed size sets (see [Sizing](#sizing))._
+`--size` has no effect on icons since they always have the same sizes.
 
-Create a PNG and keep the resized SVG alongside it:
+Make a PNG and an SVG:
 
 ```shell
 svgy example.svg --png --svg
 ```
 
 > - **`example.svg`**
-> - `example.svgy.svg` _1024x1024, **--svg** always uses the `svgy` suffix to prevent overwriting the source SVG._
-> - `example.svgy.png` _1024x1024, default size_
+> - `example.svgy.svg` _1024x1024_
+> - `example.svgy.png` _1024x1024_
 
-
-Fit the artwork inside a circle, for a round contact avatar:
+Put the artwork in a circle, for a round avatar:
 
 ```shell
 svgy example.svg --round
 ```
 
 > - **`example.svg`**
-> - `example.round.svg` _1024x1024, **--round** uses the `round` suffix._
+> - `example.round.svg` _1024x1024_
 
+### Main options
 
-## Output targets
+- `--svg`, `--png`, `--ico`, `--icns`, `--round`: Select the files to make, add `=<path>` for the
+  destination.
+- `--size=<pixels>`: Make the image fit in a square. The default is `1024`.
+- `--suffix=<suffix>`: Change the end of the file name. The default is `svgy`.
+- `--precision=<fraction>`: Set the maximum change to the SVG image. The default is `0.02`.
+- `--no-optimize`: Do not make the files smaller. Svgy is then much faster.
 
+Refer to [Options](docs/options.md) for all options.
 
-- `--svg[=<path>]`: Convert to an optimized and minified SVG, indented with tabs.
-- `--png[=<path>]`: Convert to an optimized PNG.
-- `--ico[=<path>]`: Convert to an optimized Windows icon `.ico`.
-- `--icns[=<path>]`: Convert to an optimized macOS icon `.icns`.
-- `--round[=<path>]`: Convert to an SVG whose artwork is centered and fitted inside a circle.
+## Documentation
 
-The output images are by default resized to fit 1024 x 1024, except icons which have specific sets
-of sizes per platform.
-
-## Sizing
-
-All sizing parameters are optional, and they all preserve the aspect ratio.
-
-- `--size=<pixels>`: Resize to a square of `<pixels>` by `<pixels>`.
-- `--width=<pixels>`: Resize to the specified **width**.
-- `--height=<pixels>`: Resize to the specified **height**.
-- `--no-resize`: Keep the original dimensions.
-- `--no-square`: Fit the canvas to the artwork instead of padding it to the requested size.
-
-**Notes:**
-- Passing `--width` and `--height` together fits the artwork inside that box.
-- The canvas is padded to the requested size, and the artwork is centered in it. A 620 x 720 source
-  with `--size=1024` gives a `viewBox="0 0 1024 1024"`. Use `--no-square` to get `viewBox="0 0 882
-  1024"`.
-- Padding needs both dimensions, so `--width` or `--height` alone leaves the free axis tight.
-- The sizing parameters `--size`, `--width`, `--height` are mutually exclusive.
-- For icons, non-square source SVGs are resized and centered.
-- Sizing parameters do not apply to `.ico` and `.icns` since they have fixed size sets.
-
-
-## Rounding
-
-- `--padding[=<0.0..1.0>]`: Fraction of the inscribed circle's radius to leave empty around the
-  artwork. `0.0` by default, or `0.1` when the source has a full-canvas background; bare
-  `--padding` means `0.1`. svgy prints which default it applied. The upper bound is exclusive.
-
-`--padding` applies to `--round` only.
-
-## Output naming
-
-- If the destination is not specified, the output is written beside the source as
-  `<name>.<suffix>.<extension>`, with `svgy` as the default suffix.
-  - `svgy example.svg --png` -> `example.svgy.png`
-  - `svgy example.svg --icns` -> `example.svgy.icns`
-- `--suffix=<suffix>`: Use `<suffix>` instead of `svgy`.
-  - `svgy example.svg --png --suffix=v2` -> `example.v2.png`
-- `--round` is the one exception: its default suffix is `round`, so that `--svg` and `--round` can
-  be asked for together without both claiming `example.svgy.svg`.
-  - `svgy example.svg --svg --round` -> `example.svgy.svg` and `example.round.svg`
-
-## Behaviour
-
-- **Order of operations**: read -> check images -> strip text -> resize -> round -> optimize -> write each target.
-  Rounding runs last, inside whatever canvas `--size` set, and the raster targets are rendered from
-  the resized SVG, before optimization.
-- **The precision search only changes the SVG.** `--png`, `--ico` and `--icns` are rendered from the
-  document before optimization, so their pixels never pay for a smaller SVG.
-- **`--round` is a target** `svgy logo.svg --round --icns` writes a round SVG _and a normal
-  `.icns`_, the icon is not round-fitted. For round icons, run svgy twice and feed it the round SVG.
-- **Text is removed.** `<text>` and its children are stripped from the source before anything else
-  runs, so every target agrees on what the artwork is: it is absent from `--svg` just as it is from
-  `--png`, `--ico` and `--icns`, and `--round` fits the circle to what remains. svgy prints a
-  warning when it removes text. Convert text to paths before converting the icon. In Inkscape,
-  select the text and use **Path > Object to Path** (`Shift+Ctrl+C`).
-- **An `<image>` stops the run.** svgy converts vector artwork. A bitmap does not render, so it
-  would stay in the `--svg` output and be missing from `--png`, `--ico` and `--icns`, and `--round`
-  would fit the circle to the rest. Trace the image to paths first, or pass `--strip-images` to
-  remove the element and convert what remains. This covers every `<image>`, whether its `href`
-  holds a data URI, a file path or an SVG.
-- **One input at a time.** Globs and multiple inputs are not supported; use a shell loop.
-- **Missing directories are created.** A destination may name a subdirectory that does not exist
-  yet, as the icons example above does.
-- **Existing files are overwritten** without asking.
-- **Exit codes**: `0` on success, `1` on any error, with a message on stderr.
-
-## Other options
-
-- `--precision[=<FRACTION>]`: Difference allowed between the optimized SVG and the source, as a
-  fraction of the render. `0.02` by default, and bare `--precision` means the same. svgy optimizes
-  at each precision from 0 to 5 decimals, renders both the source and the candidate at 1024 x 1024,
-  and keeps the first candidate whose difference fits the budget. It then writes each element at its
-  own precision when that saves bytes and still fits the budget, and prints the range it used, such
-  as `precision 0 to 1 (6 refined)`. Expect the difference to come closer to the budget, since the
-  mix spends what one precision for the whole document leaves unspent. This costs up to six renders
-  for the search and up to 32 more for the mix, under a second in practice. If no precision fits,
-  svgy warns and writes the output at 3 decimals.
-- `--no-precision`: Skip the search and write at a fixed 3 decimals.
-- `--no-optimize`: Skip optimization. SVG output skips `oxvg`, and `.png`, `.ico` and `.icns` skip
-  `oxipng`. Optimization dominates the runtime of an `.icns` or `.ico`, so this is the flag to reach
-  for when iterating.
-- `--zopfli`: Compress every PNG with Zopfli. Saves a 1~5% more, but takes 100x more time (minutes
-  instead of seconds).
-- `--no-legacy-ico`: Skip the 256-color entries in the Windows icon, keeping only the PNG ones.
-  Saves about 3.6 KiB, at the cost of dropping support for 256-color sessions and pre-Vista shells.
-- `--strip-images`: Remove every `<image>` element and convert the vector artwork that remains,
-  instead of stopping. svgy prints a warning when it removes one.
-
-## Planned
-
-Not implemented yet. Documented here so the intended surface is on record.
-
-### Targets
-
-- `--all-app[=<app>]`: Convert to all native app icons, using the source SVG location as the root
-  directory.
-  - Main icon: `app/<app>.svg`
-  - Windows: `windows/<app>.ico`
-  - macOS: `macos/<app>.icns`
-  - Linux: `linux/<app>_size.png` and `linux/<app>.svg`
-- `--svgz[=<path>]`: Convert to an optimized and GZIP-compressed SVGZ.
-- `--avif[=<path>]`: Convert to an optimized lossless AVIF.
-- `--liquid[=<icon>]`: Convert to an optimized macOS Liquid Glass icon `.icon` directory.
-- `--linux[=<app>]`: Convert to a set of optimized PNGs (`<size>.png`) and an SVG (`scalable.svg`)in the `app` directory.
-
-### Actions
-
-- `--set-folder-icon[=<dir>]`: Set the folder icon, macOS only. Without a value, the icon is for the directory containing the source SVG.
-
-### Parameters
-
-- `--in-place`: Overwrite the source `.svg`. SVG output only. Warning: this is a destructive
-  parameter.
-- `--keep-ids`: Keep SVG IDs, for example `<path id="this-is-kept">`. svgy shortens IDs and drops
-  the unreferenced ones today, and this parameter turns both off.
-- `--round-anchor=<shape|canvas>`: Whether `--round` recenters the artwork on the canvas (`canvas`,
-  the default and current behaviour) or scales it in place, leaving its center where it is
-  (`shape`).
-- `--if-exists=<replace|keep|if-smaller|suffix>`: What to do when the destination exists. `replace`
-  by default. `keep` to leave existing files alone, `if-smaller` to replace only when the new file
-  is smaller, `suffix` to keep existing files and write to the suffixed name instead, replacing an
-  existing suffixed file.
-- `--quiet`: No output. Mutually exclusive with `--verbose`.
-- `--verbose`: Print out all operations. The default prints one line per file written.
-- `--all-app-dir=<dir>`: See `--all-app`.
-- `--app_id=<app_id>`: See `--all-app`.
-
-### Optimization
-
-IDs referenced from the document (`url(#gradient)`, `href="#clip"`, and the like) are never
-stripped, whether or not `--keep-ids` is passed; the parameter governs the unreferenced ones.
-
-## References
-
-### Sizes
-
-| Type                                       | Extension | Icons in set | Size                   |
-| ------------------------------------------ | --------- | :----------: | ---------------------- |
-| Scalable Vector Graphics                   | `.svg`    |     _1_      | 1024 x 1024            |
-| Compressed Scalable Vector Graphics (gzip) | `.svgz`   |     _1_      | 1024 x 1024            |
-| Portable Network Graphics                  | `.png`    |     _1_      | 1024 x 1024            |
-| [macOS icon](#macos-icon)                  | `.icns`   |      11      | 16 x 16 to 1024 x 1024 |
-| [Windows icon](#windows-icon)              | `.ico`    |      8       | 16 x 16 to 256 x 256   |
-| AV1 Image File Format                      | `.avif`   |     _1_      | 1024 x 1024            |
-
-`.icns` and `.ico` are multi-resolution containers: they hold every entry listed below, and the
-OS picks one. Their size sets are fixed and cannot be overridden, on purpose: the default is
-meant to be the good, opinionated answer.
-
-### macOS icon
-
-File extension: `.icns`
-
-| Size         | Pixels      | Type   |  Format  |
-| ------------ | ----------- | ------ | :------: |
-| 16 x 16      | 16 x 16     | `ic04` | ARGB-RLE |
-| 16 x 16 @2   | 32 x 32     | `ic11` |   PNG    |
-| 32 x 32      | 32 x 32     | `ic05` | ARGB-RLE |
-| 32 x 32 @2   | 64 x 64     | `ic12` |   PNG    |
-| 48 x 48      | 48 x 48     | `icp6` |   PNG    |
-| 128 x 128    | 128 x 128   | `ic07` |   PNG    |
-| 128 x 128 @2 | 256 x 256   | `ic13` |   PNG    |
-| 256 x 256    | 256 x 256   | `ic08` |   PNG    |
-| 256 x 256 @2 | 512 x 512   | `ic14` |   PNG    |
-| 512 x 512    | 512 x 512   | `ic09` |   PNG    |
-| 512 x 512 @2 | 1024 x 1024 | `ic10` |   PNG    |
-
-> **Notes:**
->
-> - The 16 x 16 and 32 x 32 entries store straight-alpha ARGB with each channel PackBits-RLE encoded; every larger entry embeds its PNG bytes verbatim.
-> - Eleven entries cover eight distinct pixel sizes, and each size is rendered once. The 256 and 512 renders are also encoded once and their PNG bytes reused across both OSTypes. The 32 render is encoded twice, because its two entries want different formats: ARGB-RLE for `ic05` and PNG for `ic11`.
-
-### Windows icon
-
-File extension: `.ico`
-
-Eight entries for six sizes: the two smallest are stored twice, once in full color and once for
-256-color consumers. Pass `--no-legacy-ico` for the six PNG entries alone.
-
-| Size      | Format | Declared depth | Alpha      |
-| --------- | :----: | :------------: | ---------- |
-| 16 x 16   |  PNG   |     32 bpp     | 8-bit      |
-| 16 x 16   |  BMP   |     8 bpp      | 1-bit mask |
-| 32 x 32   |  PNG   |     32 bpp     | 8-bit      |
-| 32 x 32   |  BMP   |     8 bpp      | 1-bit mask |
-| 48 x 48   |  PNG   |     32 bpp     | 8-bit      |
-| 64 x 64   |  PNG   |     32 bpp     | 8-bit      |
-| 128 x 128 |  PNG   |     32 bpp     | 8-bit      |
-| 256 x 256 |  PNG   |     32 bpp     | 8-bit      |
-
-> **Notes:**
->
-> - 256 x 256 is the largest size an `.ico` can address, as the width and height fields are single bytes (0 meaning 256).
-> - PNG entries are optimized by oxipng. Their declared depth is what Windows compares against the display when choosing between two entries of the same size, so it stays at the conventional 32 even where oxipng has reduced the PNG to an 8-bit palette; readers take the real depth from the IHDR.
-> - The BMP entries are the classic bottom-up 8bpp DIB: a 256-entry color table, then the color data, then the 1-bit AND mask. Colors come from a median-cut palette of the source render.
-> - They exist for sessions capped at 256 colors, such as an old `mstsc` or the "Limit maximum color depth" policy, where Windows prefers an entry declaring 8 bpp. They also keep those two sizes readable by pre-Vista shells, which cannot decode PNG entries at all.
-> - They cost about 3.6 KiB: the color table alone is a fixed 1 KiB per entry, written in full rather than trimmed with `biClrUsed`, since the point of these entries is to be boring for old readers. `--no-legacy-ico` drops them.
-> - A 1-bit mask has no partial transparency. Pixels below 50% alpha vanish and the rest become fully opaque, so anti-aliased edges turn hard. This only affects the 256-color entries.
-
-### Linux icons
-
-See:
-
-- [Icon Theme Specification](https://specifications.freedesktop.org/icon-theme/latest/)
-- APPImage: [The filesystem image](https://github.com/AppImage/AppImageSpec/blob/master/draft.md#the-filesystem-image)
-
-
-Installation path:
-
-- SVG:
-  - `/usr/share/icons/hicolor/scalable/apps/<id.app>.svg` _e.g. com.ystorian.svgy.svg_
-- PNG:
-  - `/usr/share/icons/hicolor/256x256/apps/<id.app>.png` _e.g. com.ystorian.svgy.png_
-
-
-### Pipelines
-
-- SVG: rewrite the root `viewBox` -> multiply the scale into every coordinate in place -> round
-  coordinates to 6 decimals -> optimize with oxvg -> search for the lowest precision
-- ROUND: measure the artwork's minimum enclosing circle (background fills excluded) -> bake the
-  scale and translation that map it onto the inscribed circle into every coordinate -> optimize with
-  oxvg -> search for the lowest precision
-- PNG: render with resvg -> optimize with oxipng
-- ICO: render each size with resvg -> encode PNG -> optimize with oxipng -> embed verbatim, plus a
-  median-cut 256-color BMP for 16 x 16 and 32 x 32
-- ICNS: render each size with resvg -> 16 and 32 to straight-alpha ARGB with PackBits RLE, larger
-  sizes to PNG -> optimize with oxipng -> embed verbatim
-
-Resizing adds no `transform`: the scale and the centering offset are multiplied into each
-coordinate, which renders identically to the source while preserving the original element structure.
-Existing transforms are rewritten in place rather than flattened, and a `<symbol>` or any other
-template a `<use>` instantiates keeps its own coordinates, since the instance carries the offset.
-The output `viewBox` always starts at `0 0`. This describes the resize step alone. The optimizer
-that runs after it is free to restructure the document, and it can move a shared `transform` onto a
-group.
-
-Every SVG goes through `oxvg` with its default job set. Element structure is indented with tabs and
-attribute values are minified, so the output stays readable. `removeDimensions` is on, except under
-`--no-resize`, where the `width` and `height` are the source's own and are kept.
-
-Three jobs are added to the default set:
-
-- `removeXlink` writes `xlink:href` as the native `href`, which also frees the `xmlns:xlink`
-  declaration.
-- `removeAttrs` drops `xml:space`. Text is removed before the optimizer, so nothing is left for
-  `xml:space` to act on, and it stops the serializer from indenting the document.
-- `convertStyleToAttrs` moves a `style` declaration to a presentation attribute, which
-  `removeUnknownsAndDefaults` then drops when it repeats the default.
-
-Five cleanups of svgy frame those jobs.
-
-The `id` of the root element is removed first, when nothing in the document names it.
-`removeUselessStrokeAndFill` stops at an element that carries an `id`, and the root carries every
-other element, so one dead `id` keeps every useless `stroke="none"` in the document.
-
-A gradient that only lends its stops is written into the gradient that borrows them next. Editors
-write a paint as a pair: one `<linearGradient>` holds the stops, and a second one holds the
-coordinates and names the first with an `href`. The pair is one gradient written twice, so it
-becomes one element, which saves the wrapper of the lender and the reference, about 37 bytes a pair.
-
-The move needs the lender to stand alone: a second borrower would need the stops copied, which is
-not always shorter, and a `fill` that names the lender would lose its paint. The two gradients need
-not be of the same kind, which editors often write: a gradient inherits only the attributes that its
-own kind reads, so the move leaves the coordinates of the other kind behind. A `<radialGradient>`
-reads no `x1`, and a `<linearGradient>` no `cx`. No `oxvg` job does any of this, and
-`convertOneStopGradients` only handles a gradient with a single stop.
-
-A `gradientTransform` is folded into the coordinates of its gradient next. The color of a
-`<linearGradient>` is an affine function of the point, and an affine function stays affine through
-an affine map, so every invertible transform folds into its two ends. A `<radialGradient>` also
-carries a circle, and only a translation, a rotation and a uniform scale keep a circle a circle. A
-skew or an axis-dependent scale makes an ellipse, which `r` cannot express. That transform stays,
-and so does one on a coordinate given as a percentage, or on an absent coordinate (a percentage by
-default).
-
-An opacity written in a `style` attribute then keeps three decimals. `cleanup_numeric_values` reads
-attributes, and `stop-opacity` maps to no attribute that `convertStyleToAttrs` can write, so an
-editor value such as `stop-opacity:0.98039216` reaches the output whole. An opacity holds a fraction
-of 0 to 1, where three decimals name every step the eye can tell apart. A length keeps its decimals,
-since the precision search is what decides those.
-
-A namespace declaration that no element or attribute name uses is removed last. Editors leave
-declarations such as `xmlns:svg` behind, and the `oxvg` serializer repeats them on every element.
-The default `xmlns` always stays.
-
-A `<style>` or a `<script>` decides what an element looks like in a way that reading the attributes
-cannot follow. Such a document keeps its `style` attributes and its root `id`.
-
-The job list then runs again, up to three times in all. Each job runs once per run, in a fixed
-order, and the jobs that merge segments run before the jobs that round the numbers. Rounding can
-make two segments collinear, which the merge that already ran can no longer see. The next run reads
-what the run before it wrote and takes the merge. A run that writes no fewer bytes than the run
-before it is dropped, since `convertPathData` can trade a curve for a longer arc. Every test file
-settles after the second run.
-
-One number then drives the five `oxvg` rounding settings, and svgy searches for the lowest one that
-still looks right. `convertPathData` dominates the result, since most of an icon is path data. The
-error grows as the precision drops, so the first precision that fits the budget is also the smallest
-one that fits. `mergePaths` keeps a tolerance of its own that the search cannot reach, which is why
-a small difference remains even at the highest precision.
-
-Artwork already drawn on whole numbers reaches 0 decimals with no difference at all. Detailed
-artwork settles higher. Expect `--round` to land a decimal higher than `--svg` on the same source,
-because rounding has already rescaled the coordinates off whole numbers.
-
-One precision for the whole document gives every element the decimals that the worst element needs,
-which leaves budget unspent. svgy then mixes the candidates it has already built: every element
-starts at the lowest precision, and the elements that need decimals buy them back one at a time. The
-output reports the range it spans, such as `precision 0 to 1 (6 refined)`.
-
-Which element to refine next is an estimate, and only the order of the tries rests on it. A rounded
-coordinate moves an edge sideways, so the estimate is the length of the outline that moves, divided
-by the bytes another decimal costs. A gradient has no outline and goes last. Every try is then
-rendered, and the budget decides, so a poor estimate costs bytes and never accuracy.
-
-A mix needs the candidates to hold the same document, since it moves attributes between them. The
-element names, the nesting, the attribute names, and every `id`, `href` and `class` must match. A
-job such as `mergePaths` can restructure the document differently at another precision, and svgy
-then keeps what the search chose. It also keeps that document when no mix reaches the budget, or
-when the mix saves nothing.
-
-The mix spends the budget you name, so expect the reported difference to rise towards it. Pass a
-smaller `--precision` to buy the accuracy back.
-
-Every PNG goes through `oxipng` at preset **4**, with alpha optimization on. Pass `--zopfli` to use
-the Zopfli deflater, this saves 1~5% more, 2% on average, but this requires minutes instead of
-seconds. Pass `--no-optimize` to skip optimization entirely.
+- [Options](docs/options.md): All targets and options.
+- [Behavior](docs/behavior.md): Steps, text, images, files, and exit codes.
+- [Formats](docs/formats.md): The images in the `.icns` and `.ico` files.
+- [Optimization](docs/optimization.md): How Svgy makes files smaller.
+- [Roadmap](docs/roadmap.md): Planned features.
 
 ## Requirements
 
 Rust, edition 2024.
 
-`--set-folder-icon` (planned) will be OS-specific. Everything else is cross-platform: an `.icns` can
-be produced on Windows and an `.ico` on macOS.
-
-## Licence
+## License
 
 Dual-licensed under either of
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT License ([LICENSE-MIT](LICENSE-MIT))
+- [Apache License](LICENSE-APACHE), Version 2.0
+- [MIT License](LICENSE-MIT)
 
 at your option.
 
-Unless you state otherwise, any contribution intentionally submitted for inclusion in svgy, as
-defined in the Apache-2.0 licence, shall be dual-licensed as above, without any additional terms or
+Unless you state otherwise, any contribution intentionally submitted for inclusion in `svgy`, as
+defined in the Apache-2.0 license, shall be dual-licensed as above, without any additional terms or
 conditions.
