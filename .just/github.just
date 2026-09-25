@@ -1,14 +1,20 @@
-# .just/github.just
+# @template/.just/github.just
 
 # Variables.
 # Return the repository name.
 repo := if which("gh") == [] { '' } else { shell("gh repo view --json name --jq '.name'") }
+
 # Return the repository owner (organization).
 owner := if which("gh") == [] { '' } else { shell("gh repo view --json owner --jq '.owner.login'") }
+
 # Return the GitHub user name.
 user := if which("gh") == [] { '' } else { shell("gh api user --jq '.login'") }
+
 # GitHub auth token.
 github_token := if env('GITHUB_TOKEN', '') != '' { env('GITHUB_TOKEN') } else if which("gh") == [] { '' } else { shell('gh auth token 2>/dev/null || echo ""') }
+
+# Name of the CI job that the status checks ruleset must require.
+status_check := 'Status check'
 
 # Audit actions
 [group('GitHub Actions')]
@@ -44,8 +50,8 @@ update_actions:
 		--update \
 		--verify \
 		--min-age 7 \
-		--log-level warn || \
-		exit 0
+		--log-level warn \
+	|| exit 0
 
 	echo {{ done('') }}
 
@@ -102,7 +108,9 @@ env_list_secrets env='production' repo=repo:
 # List all secrets not environment restricted
 [group('GitHub Actions')]
 env_list_secrets_all repo=repo:
-	echo {{ CYAN }}List {{ BOLD }}all secrets{{ NORMAL + CYAN }} that are {{ YELLOW + 'not environment restricted' + NORMAL + CYAN }} in {{ GREEN + owner + '/' + repo + NORMAL }}
+	echo {{ CYAN }}List {{ BOLD }}all secrets{{ NORMAL + CYAN }} that are \
+		{{ YELLOW + 'not environment restricted' + NORMAL + CYAN }} in \
+		{{ GREEN + owner + '/' + repo + NORMAL }}
 
 	just check_command_gh
 
@@ -154,7 +162,7 @@ create_env repo=repo env='production':
 		--field deployment_branch_policy[custom_branch_policies]=true \
 		--jq '.deployment_branch_policy.custom_branch_policies'
 
-	echo {{ CYAN }}Set the branch protection to the {{ GREEN + main_branch + CYAN }} branch{{ NORMAL }}
+	echo {{ CYAN }}Set the branch protection on {{ GREEN + main_branch + NORMAL }}
 	gh \
 		api \
 		--method POST \
@@ -252,6 +260,23 @@ check_rulesets owner=owner repo=repo:
 			missing="$missing $rule"; \
 		fi; \
 	done; \
+	if printf '%s' "$rules" | jq -e 'any(.[]; .type=="required_status_checks")' >/dev/null; then \
+		if printf '%s' "$rules" | jq -e --arg check '{{ status_check }}' \
+			'any(.[]; .type=="required_status_checks" and \
+				any(.parameters.required_status_checks[]?; .context==$check))' >/dev/null; then \
+			echo "{{ dim(['✅', GREEN + BOLD + status_check, 'is a required check']) }}"; \
+		else \
+			echo "{{ dim([NORMAL + RED + '❌' + BOLD + status_check, RED + 'is not a required check']) }}"; \
+			missing="$missing status_check"; \
+		fi; \
+		if printf '%s' "$rules" | jq -e 'any(.[]; .type=="required_status_checks" and \
+			.parameters.strict_required_status_checks_policy==true)' >/dev/null; then \
+			echo "{{ dim(['✅', GREEN + BOLD + 'Branches must be up to date', 'before merging']) }}"; \
+		else \
+			echo "{{ dim([NORMAL + RED + '❌' + BOLD + 'Branches can be out of date', RED + 'before merging']) }}"; \
+			missing="$missing strict_status_checks"; \
+		fi; \
+	fi; \
 	if ! ids=$(gh api repos/{{ owner }}/{{ repo }}/rulesets --jq '.[].id' 2>/dev/null); then \
 		ids=''; \
 	fi; \
@@ -279,7 +304,7 @@ check_rulesets owner=owner repo=repo:
 check_branch_protection owner=owner repo=repo:
 	if protection=$(gh api repos/{{ owner }}/{{ repo }}/branches/{{ main_branch }}/protection \
 		2>/dev/null); then \
-		echo "{{ warning(['Classic branch protection on', BOLD + main_branch, 'should be a ruleset']) }}"; \
+		echo "{{ warning('Classic branch protection should be a ruleset') }}"; \
 		enabled=$(printf '%s' "$protection" | jq -r \
 			'[to_entries[]|select(.value|type=="object")|select(.value.enabled)|.key]|join(" ")'); \
 		checks=$(printf '%s' "$protection" | \
@@ -287,7 +312,7 @@ check_branch_protection owner=owner repo=repo:
 		echo "{{ dim(['Enabled:', BOLD + '${enabled:-none}']) }}"; \
 		echo "{{ dim(['Required checks:', BOLD + '${checks:-none}']) }}"; \
 	else \
-		echo "{{ dim(['✅', GREEN + 'Classic branch protection is', GREEN + BOLD + 'not active']) }}"; \
+		echo "{{ dim([GREEN + 'Classic branch protection is', GREEN + BOLD + 'not active']) }}"; \
 	fi
 
 # Check the name of the main branch
@@ -300,7 +325,7 @@ check_main_branch_name owner=owner repo=repo:
 		echo "{{ error(['Invalid main branch name in', BOLD + owner + '/' + repo]) }}"; \
 		echo "{{ warning(['Rename the main branch', RED + '$main_branch_name', 'to', GREEN + main_branch]) }}"; \
 	else \
-		echo "{{ dim(['✅', GREEN + 'Main branch name is', GREEN + BOLD + main_branch]) }}"; \
+		echo "{{ dim([GREEN + 'Main branch name is', GREEN + BOLD + main_branch]) }}"; \
 	fi
 
 ## Check commands.
