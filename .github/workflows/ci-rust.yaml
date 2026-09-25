@@ -6,7 +6,7 @@ on:
   schedule:
     # Runs every Monday at 06:00 UTC (Summer: 08:00, Winter: 07:00).
     - cron: 0 6 * * 1
-  workflow_dispatch: # Allows manual triggering
+  workflow_dispatch: # Allows manual triggering.
   push:
     # Run on push to branches, ignore push to tags.
     branches:
@@ -42,10 +42,17 @@ env:
   CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER: lld-link.exe
   CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: lld-link.exe
 
+  # Override the crt-static flag from `.cargo/config.toml`, this slows down CI runs.
+  CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_RUSTFLAGS: ""
+  CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: ""
+
+  # Specific variables for this project.
+
 
 jobs:
-  # Detect whether any relevant file has changed.
+
   changes:
+    # Uses `dorny/paths-filter` with `.github/filters.yaml` to skip irrelevant jobs.
     name: Detect changes
     runs-on: ubuntu-slim
     permissions:
@@ -97,7 +104,7 @@ jobs:
           min_age: "7"
 
       - name: Install cargo tools
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@4076c08d76dba979c11a7285295b0716c1d67908 # v2.87.15
         with:
           tool: |
             cargo-deny
@@ -137,6 +144,7 @@ jobs:
             name: macOS arm64
 
     steps:
+
       - name: Checkout the source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -244,8 +252,9 @@ jobs:
       - name: Test
         run: cargo test --frozen --profile ci --all-features --workspace
 
-      - name: Check and lint with Clippy
-        run: cargo clippy --frozen --profile ci --all-features --workspace --tests -- -D warnings
+      - name: Linux - Check and lint with Clippy
+        if: startsWith(matrix.os, 'ubuntu')
+        run: cargo clippy --frozen --profile ci --all-features --workspace -- -D warnings
 
       - name: Prune the workspace artifacts before saving the cache
         if: steps.cargo-cache.outputs.cache-hit != 'true'

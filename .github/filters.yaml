@@ -1,21 +1,18 @@
 # .github/filters.yaml
 
-# Shared path filters used by the `changes` job.
+# Shared path filters for `dorny/paths-filter` in the `changes` job.
 #
-# Modified files that are not filtered by these exclusions will trigger the `test` jobs in:
-# - `.github/workflows/ci-rust.yaml`
-#
-# The step `Detect file changes based on filters.yaml` uses `dorny/paths-filter` with
-# `predicate-quantifier = every`:
-# - this is AND semantics
-# - it's not possible to re-include a file with a positive pattern
-# - exclude only the files to skip, tipically docs and dev config files
+# The filter is set  with `predicate-quantifier = every`:
+# - This is an AND semantics.
+# - It's not possible to re-include a file with a positive pattern.
+
 
 # Common exclusions, changes in these files are ignored in all actions.
 _common: &common
-  - "**" # Must begin with `**`.
+  # Must begin with `**`.
+  - "**"
   # Markdown.
-  - "!**.md"
+  - "!**/*.md"
   # Licenses.
   - "!LICENSE*"
   # Just recipes.
@@ -24,22 +21,29 @@ _common: &common
   # Rust.
   - "!.clippy.toml"
   - "!.rustfmt.toml"
-  # Local Docker dev.
+  # Local dev.
   - "!compose.Dockerfile"
   - "!compose.yaml"
-  - "!dev.Dockerfile"
-  # Local dev.
-  - "!.githooks/**"
+  - "!droast.toml"
   - "!.editorconfig"
   - "!.env*"
+  - "!.githooks/**"
   - "!.markdownlint.json"
-  - "!droast.toml"
   # This file.
   - "!.github/filters.yaml"
 
 
-# CI: rebuild on any source change.
-# Used by .github/workflows/ci-rust.yaml
+# CI: Ignore files only used in release.
 ci:
   - *common
-  - "!tests/**"
+  - "!*Dockerfile*"
+  - "!.dockerignore"
+  - "!.github/workflows/release*.yaml"
+
+
+# Release: Ignore files only used in CI.
+release:
+  - *common
+  - "!deny.toml"
+  - "!.gitignore"
+  - "!.github/workflows/ci**.yaml"

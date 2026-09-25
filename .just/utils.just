@@ -1,4 +1,4 @@
-# .just/utils.just
+# @template/.just/utils.just
 
 ### Variables.
 
@@ -31,7 +31,7 @@ error(message) := f'{{ RED }}❌ {{ style('dim') + recipe_name() + NORMAL + RED 
 # ⚠️ Warning: [<message>]
 warning(message) := f'{{ YELLOW }}⚠️ {{ style('dim') + BOLD + ' Warning: ' + NORMAL + YELLOW + join_list(message, ' ' + NORMAL + YELLOW) + NORMAL }}'
 
-# Display a dimmed and indented message.
+# Display an indented and dimmed message.
 # __[<message>]
 dim(message) := f'{{ style('dim') + CYAN + '  ' + join_list(message, ' ' + NORMAL + style('dim')) + NORMAL }}'
 
@@ -39,10 +39,16 @@ dim(message) := f'{{ style('dim') + CYAN + '  ' + join_list(message, ' ' + NORMA
 #
 # Usage:
 # - VS Code: Add `${sequence}` to `terminal.integrated.tabs.description`
-# - Must be used within quotes, for example:
+#
+# Must be used within quotes, for example:
 # - To set the title to "Running": `echo "{{ set_title('Running') }}"`
 # - To reset the title: `echo "{{ set_title('') }}"`
 set_title(title) := f'\033]0;{{ title }}\07'
+
+## Strings.
+
+# Base64 decode.
+base64_decode(encoded) := `base64 -d <<< {{ encoded }}`
 
 ## Files
 
@@ -66,23 +72,23 @@ branch() := `git branch --show-current`
 [private]
 create_file file:
 	if [ ! -f "{{ file }}" ]; then \
-		touch "{{ file }}" && \
-		echo "{{ dim('Created ' + GREEN + BOLD + file) }}" || \
-		echo "{{ error(['Could not create', BOLD + file]) }}" \
-	;fi
+		touch "{{ file }}" \
+		&& echo "{{ dim('Created ' + GREEN + BOLD + file) }}" \
+		|| echo "{{ error(['Could not create', BOLD + file]) }}"; \
+	fi
 
 # Write `content` in an existing `file`
 [group('Utils')]
 [private]
 write_file file content:
 	if [ -f "{{ file }}" ]; then \
-		printf '%s\n' {{ quote(content) }} > {{ file }} \
-	;fi
+		printf '%s\n' {{ quote(content) }} > {{ file }}; \
+	fi
 	if [ -f "{{ file }}" ]; then \
-		echo "{{ dim(['Wrote', GREEN + BOLD + file_size(file) + ' bytes', 'in', GREEN + BOLD + file]) }}" \
-	;else \
-		echo "{{ dim(['Could not write into', BOLD + file]) }}" \
-	;fi
+		echo "{{ dim(['Wrote', GREEN + BOLD + file_size(file) + ' bytes', 'in', GREEN + BOLD + file]) }}"; \
+	else \
+		echo "{{ dim(['Could not write into', BOLD + file]) }}"; \
+	fi
 
 # Rename a `file`
 [group('Utils')]
@@ -90,12 +96,12 @@ write_file file content:
 [private]
 rename_file old_file new_file:
 	if [ ! -f "{{ old_file }}" ]; then \
-		echo "{{ error(['Cannot rename', BOLD + old_file, ITALIC + '(file not found)']) }}" && \
-		exit 1 \
-	;fi
-	mv "{{ old_file }}" "{{ new_file }}" && \
-		echo "{{ dim(['Renamed', YELLOW + old_file, 'to', GREEN + BOLD + new_file]) }}" || \
-		echo "{{ error(['Could not rename', BOLD + old_file, 'to', BOLD + new_file]) }}"
+		echo "{{ error(['Cannot rename', BOLD + old_file, ITALIC + '(file not found)']) }}"; \
+		exit 1; \
+	fi
+	mv "{{ old_file }}" "{{ new_file }}" \
+		&& echo "{{ dim(['Renamed', YELLOW + old_file, 'to', GREEN + BOLD + new_file]) }}" \
+		|| echo "{{ error(['Could not rename', BOLD + old_file, 'to', BOLD + new_file]) }}"
 
 # Move a `file` to a `directory`
 [group('Utils')]
@@ -103,13 +109,13 @@ rename_file old_file new_file:
 [private]
 move_file file directory:
 	if [ ! -f "{{ file }}" ]; then \
-		echo "{{ error(['Cannot move', BOLD + file, ITALIC + '(file not found)']) }}" && \
-		exit 1 \
-	;fi
+		echo "{{ error(['Cannot move', BOLD + file, ITALIC + '(file not found)']) }}"; \
+		exit 1; \
+	fi
 	just create_dir {{ directory }}
-	mv "{{ file }}" "{{ directory + '/' + file_name(file) }}" && \
-		echo "{{ dim(['Moved', YELLOW + file, 'to', GREEN + BOLD + directory + '/' + file_name(file)]) }}" || \
-		echo "{{ error(['Could not move', BOLD + file, 'to', BOLD + directory + '/' + file_name(file)]) }}"
+	mv "{{ file }}" "{{ directory + '/' + file_name(file) }}" \
+		&& echo "{{ dim(['Moved', YELLOW + file, 'to', GREEN + BOLD + directory + '/' + file_name(file)]) }}" \
+		|| echo "{{ error(['Could not move', BOLD + file, 'to', BOLD + directory + '/' + file_name(file)]) }}"
 
 # Copy a `file` to a `directory`
 [group('Utils')]
@@ -117,70 +123,80 @@ move_file file directory:
 [private]
 copy_file file directory:
 	if [ ! -f "{{ file }}" ]; then \
-		echo "{{ error(['Cannot copy', BOLD + file, ITALIC + '(file not found)']) }}" && \
-		exit 1 \
-	;fi
+		echo "{{ error(['Cannot copy', BOLD + file, ITALIC + '(file not found)']) }}"; \
+		exit 1; \
+	fi
 	just create_dir {{ directory }}
-	cp "{{ file }}" "{{ directory }}" && \
-		echo "{{ dim(['Copied', YELLOW + file, 'to', GREEN + BOLD + directory]) }}" || \
-		echo "{{ error(['Could not copy', BOLD + file, 'to', BOLD + directory]) }}"
+	cp "{{ file }}" "{{ directory }}" \
+		&& echo "{{ dim(['Copied', YELLOW + file, 'to', GREEN + BOLD + directory]) }}" \
+		|| echo "{{ error(['Could not copy', BOLD + file, 'to', BOLD + directory]) }}"
 
-# Create a hardlink `link` to a `file`
+# Create a hardlink on `file` to `link`
 [group('Utils')]
 [no-exit-message]
 [private]
-link_file file link:
-	if [ ! -f "{{ file }}" ]; then \
-		echo "{{ error(['Cannot link', BOLD + file, ITALIC + '(file not found)']) }}" && \
-		exit 1 \
-	;fi
-	ln -f {{ file }} {{ link }} && \
-		echo "{{ dim(['Created hardlink on', YELLOW + file, 'to', GREEN + BOLD + link]) }}" || \
-		echo "{{ error(['Could not create hardlink', BOLD + link, 'to', BOLD + file]) }}"
+file_link file link:
+	if [ ! -f '{{ file }}' ]; then \
+		echo "{{ error(['File not found:', BOLD + file]) }}"; \
+		exit 1; \
+	fi
 
-# Delete a `file`
+	ln -fh '{{ file }}' '{{ link }}' \
+		&& echo "{{ dim(['Created hardlink on', BOLD + file, 'to', GREEN + BOLD + link]) }}" \
+		|| echo "{{ error(['Could not create hardlink', BOLD + link, 'to', BOLD + file]) }}"
+
+# Delete one or more `file`
 [group('Utils')]
 [private]
-delete_file file:
-	if [ -f "{{ file }}" ]; then \
-		rm -f "{{ file }}" 2>/dev/null && \
-			echo "{{ dim('Deleted ' + YELLOW + BOLD + file) }}" || \
-			echo "{{ error(['Could not delete', BOLD + file]) }}" \
-	;fi
+delete_file *file:
+	for file in {{ quote(file) }}; do \
+		if [ -f "$file" ]; then \
+			rm -f "$file" 2>/dev/null  \
+			&& echo "{{ dim('Deleted ' + YELLOW + BOLD + "$file") }}" \
+			|| echo "{{ error(['Could not delete', BOLD + "$file"]) }}"; \
+		fi; \
+	done
 
 ## Directories
 
-# Create a `directory`
+# Create one or more directories
 [group('Utils')]
 [private]
-create_dir directory:
-	if [ ! -d "{{ directory }}" ]; then \
-		mkdir "{{ directory }}" && \
-			echo "{{ dim('Created directory ' + GREEN + BOLD + directory) }}" || \
-			echo "{{ error(['Could not create directory', BOLD + directory]) }}" \
-	;fi
+create_dir *dir:
+	for dir in {{ quote(dir) }}; do \
+		if [ ! -d "$dir" ]; then \
+			mkdir "$dir" \
+			&& echo "{{ dim('Created directory ' + GREEN + BOLD + "$dir") }}" \
+			|| echo "{{ error(['Could not create directory', BOLD + "$dir"]) }}";\
+		fi; \
+	done
 
-# Delete a `directory`
+# Delete one or more directories
 [group('Utils')]
 [private]
-delete_dir directory:
-	if [ -d "{{ directory }}" ]; then \
-		rm -rf "{{ directory }}" 2>/dev/null && \
-			echo "{{ dim('Deleted directory ' + YELLOW + BOLD + directory) }}" || \
-			echo "{{ error(['Could not delete directory', BOLD + directory]) }}" \
-	;fi
+delete_dir *dir:
+	for dir in {{ quote(dir) }}; do \
+		if [ -d "$dir" ]; then \
+			rm -rf "$dir" 2>/dev/null \
+			&& echo "{{ dim('Deleted directory ' + YELLOW + BOLD + "$dir") }}" \
+			|| echo "{{ error(['Could not delete directory', BOLD + "$dir"]) }}"; \
+		fi; \
+	done
 
 ## Variables
 
-# Test if an environment `variable` is set
+# Test if one or more environment variables are declared
 [group('Utils')]
 [no-exit-message]
 [private]
-test_var variable:
-	if [ -z "$(printenv {{ variable }})" ]; then \
-		echo "{{ error(['The environment variable', BOLD + variable, 'is not declared', ITALIC + '(variable names are case-sensitive)']) }}" && \
-		exit 1 \
-	;fi
+test_var *variable:
+	for variable in {{ quote(variable) }}; do \
+		if [ -z "$(printenv $variable)" ]; then \
+			echo "{{ error(['The environment variable', BOLD + "$variable", 'is not declared']) }}"; \
+			echo "{{ warning('Variable names are case-sensitive') }}"; \
+			exit 1; \
+		fi; \
+	done
 
 ## Tools
 
@@ -190,11 +206,11 @@ test_var variable:
 [private]
 check_command command macos_text='' windows_text='':
 	if ! command -v {{ command }} >/dev/null 2>&1; then \
-		echo "{{ error(['The command', BOLD + command, 'is not available']) }}" && \
-		echo "{{ if os() == 'macos' { dim(['Install', YELLOW + BOLD + command, 'with', GREEN + BOLD + macos_text]) } }}" && \
-		echo "{{ if os() == 'windows' { dim(['Install', YELLOW + BOLD + command, 'with', GREEN + BOLD + windows_text]) } }}" && \
-		exit 1 \
-	;fi
+		echo "{{ error(['The command', BOLD + command, 'is not available']) }}"; \
+		echo "{{ if os() == 'macos' { dim(['Install', YELLOW + BOLD + command, 'with', GREEN + BOLD + macos_text]) } }}"; \
+		echo "{{ if os() == 'windows' { dim(['Install', YELLOW + BOLD + command, 'with', GREEN + BOLD + windows_text]) } }}"; \
+		exit 1; \
+	fi
 
 # Lints
 
@@ -217,22 +233,25 @@ lint_just:
 check_just:
 	echo "{{ dim(['just', BOLD + just_version()]) }}"
 	if ! just --format --check --indentation '{{ "\t" }}' >/dev/null 2>&1; then \
-		echo "{{ error([BOLD + 'justfile', 'is not linted, run', MAGENTA + 'just lint_just']) }}" \
-	;fi
+		echo "{{ error([BOLD + 'justfile', 'is not linted, run', MAGENTA + 'just lint_just']) }}"; \
+	fi
 
 	for justfile in `ls .just`; do \
 		if ! just --format --check --indentation '{{ "\t" }}' \
 			--justfile .just/$justfile >/dev/null 2>&1; then \
-			echo "{{ error([BOLD + '.just/$justfile', 'is not linted, run', MAGENTA + 'just lint_just']) }}" \
-		;fi \
-	;done
+			echo "{{ error([BOLD + '.just/$justfile', 'is not linted, run', MAGENTA + 'just lint_just']) }}"; \
+		fi; \
+	done
 	echo {{ done('') }}
 
 # Check for lint issues in all Markdown files
 [group('Utils')]
 check_markdown:
 	echo {{ CYAN }}Check all {{ BOLD }}markdown{{ NORMAL + CYAN }} files{{ NORMAL }}
-	bunx --bun markdownlint-cli2  "**/*.md"
+
+	BUN_TMPDIR="$TMPDIR" \
+	BUN_INSTALL_CACHE_DIR="$TMPDIR/bun-cache" \
+	bunx --bun markdownlint-cli2 "**/*.md"
 	echo {{ done('') }}
 
 ## Performances
@@ -240,17 +259,23 @@ check_markdown:
 # Disable Spotlight indexing and Time Machine backups on generated files
 [group('Utils')]
 [macos]
-no_index:
+[no-exit-message]
+no_index dir='.':
 	echo {{ CYAN }}Disable {{ BOLD }}Spotlight indexing{{ NORMAL + CYAN }} and \
 	{{ BOLD }}Time Machine backups{{ NORMAL + CYAN }} on generated files{{ NORMAL }}
 
-	# Dotted directories like ".git" are ignored by SpotLight, but we also exclude them from Time
-	# Machine backups.
+	if [ '{{ dir }}' != '.' ]; then \
+		echo "{{ BLUE }}Directory: {{ BOLD + absolute_path(dir) + NORMAL }}"; \
+	fi
 
-	echo {{ CYAN }}  {{ BOLD }}Git{{ NORMAL }}
-	just no_index_dir .git
+	if [ ! -d "{{ absolute_path(dir) }}" ]; then \
+		echo "{{ error(['Directory', BOLD + dir, 'not found']) }}"; \
+		exit 1; \
+	fi
 
-	echo {{ CYAN }}  {{ BOLD }}Rust{{ NORMAL }}
+	# Global
+
+	# Rust.
 	# Global Cargo `git`, assuming it contains `CACHEDIR.TAG`.
 	just no_index_dir "{{ env('CARGO_HOME') + '/git' }}"
 	# Global Cargo `registry`, assuming it contains `CACHEDIR.TAG`.
@@ -258,15 +283,21 @@ no_index:
 	# Global Rustup directory.
 	just no_index_dir "{{ env('RUSTUP_HOME') }}"
 
-	just no_index_dir dist
-	just no_index_dir target
-	just no_index_dir data
+	# Local.
 
-	echo {{ CYAN }}  {{ BOLD }}Javascript{{ NORMAL }}
-	just no_index_dir node_modules
+	# Git.
+	just no_index_dir "{{ absolute_path(dir + '/' + '.git') }}"
 
-	echo {{ CYAN }}  {{ BOLD }}PHP{{ NORMAL }}
-	just no_index_dir vendor
+	# Rust.
+	just no_index_dir "{{ absolute_path(dir + '/' + 'dist') }}"
+	just no_index_dir "{{ absolute_path(dir + '/' + 'target') }}"
+	just no_index_dir "{{ absolute_path(dir + '/' + 'data') }}"
+
+	# Javascript.
+	just no_index_dir "{{ absolute_path(dir + '/' + 'node_modules') }}"
+
+	# PHP.
+	just no_index_dir "{{ absolute_path(dir + '/' + 'vendor') }}"
 
 	echo {{ done('') }}
 
@@ -281,19 +312,25 @@ no_index_dir dir:
 	# - `com.apple.metadata:kMDItemSupportFileType` is undocumented.
 
 	if [ ! -d "{{ absolute_path(dir) }}" ]; then \
-		echo "{{ dim(YELLOW + ITALIC + dir) }}"; \
 		exit 0; \
 	else \
 		just delete_file "{{ dir + '/.metadata_never_index' }}"; \
 		if ! [[ "$(xattr -p com.apple.metadata:kMDItemSupportFileType \
-			"{{ absolute_path(dir) }}")" =~ 'MDSystemFile' ]]; then \
+				"{{ absolute_path(dir) }}" 2>/dev/null)" =~ 'MDSystemFile' ]]; then \
 			xattr -w com.apple.metadata:kMDItemSupportFileType MDSystemFile \
-			"{{ absolute_path(dir) }}"; \
-			echo "{{ dim(GREEN + 'Excluded from Spotlight indexing: ' + BOLD + dir) }}"; \
+				"{{ absolute_path(dir) }}"; \
+			echo "{{ warning(['Excluded', BOLD + dir, 'from Spotlight indexing']) }}"; \
 		fi; \
+	fi
+
+	if [[ "{{ absolute_path(dir) }}" =~ '/.git' ]]; then \
+		if [[ "$(tmutil isexcluded "{{ absolute_path(dir) }}")" =~ '[Excluded]' ]]; then \
+			tmutil removeexclusion "{{ absolute_path(dir) }}"; \
+			echo "{{ warning(['Included', BOLD + dir, 'in Time Machine backups']) }}"; \
+		fi; \
+	else \
 		if [[ "$(tmutil isexcluded "{{ absolute_path(dir) }}")" =~ '[Included]' ]]; then \
 			tmutil addexclusion "{{ absolute_path(dir) }}"; \
-			echo "{{ dim(GREEN + 'Excluded from Time Machine: ' + BOLD + dir) }}"; \
+			echo "{{ warning(['Excluded', BOLD + dir, 'from Time Machine backups']) }}"; \
 		fi; \
-		echo "{{ dim(GREEN + dir) }}"; \
 	fi

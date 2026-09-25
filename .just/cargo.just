@@ -1,27 +1,39 @@
 # .just/cargo.just
 
 # Variables.
-# Globaly required Rust tools.
-cargo_tools := ['cargo-clean-all', 'cargo-deny', 'cargo-update', 'just', 'tomli', 'zizmor']
-# Tools required by this project.
-project_tools := []
+
+# Cargo tools required for all Rust projects.
+required_cargo_tools := ['cargo-clean-all', 'cargo-deny', 'cargo-update', 'just', 'tomli']
+# Note:
+# - Additional Cargo tools required by this project are defined in `.just/_main.just`.
+# - In `_main.just` set the variable `additional_cargo_tools := []` for none.
 
 # cargo-binstall.
-need_binstall := if which("cargo-binstall") == [] { 'true' } else { 'false' }
 binstall_options := ['--locked', '--no-confirm', '--only-signed', '--disable-telemetry']
-native_target := if os() == 'windows' { arch() + '-pc-windows-msvc' } else if os() == 'macos' { arch() + '-apple-darwin' } else if os() == 'linux' { arch() + '-unknown-linux-gnu' } else { arch() }
 
-# GitHub auth token.
-github_token := if which("gh") == [] { '' } else { shell('gh auth token') }
+# Native target per OS.
+[linux]
+native_target := arch() + '-unknown-linux-gnu'
+[macos]
+native_target := arch() + '-apple-darwin'
+[windows]
+native_target := arch() + '-pc-windows-msvc'
 
-# crates.io API token, read from cargo credentials, use `cargo login` to generate.
-crates_io_token := trim(replace(shell('tomli query --filepath ' + env('CARGO_HOME') + '/credentials.toml registry.token 2>/dev/null || echo ""'), '"', ''))
+# API token for `crates.io`.
+#
+# Note: use `cargo login` to generate.
+crates_io_token := trim(replace(shell('tomli query \
+	--filepath ' + env('CARGO_HOME') + '/credentials.toml \
+	registry.token \
+	2>/dev/null \
+	|| echo ""'), '"', ''))
 
-# crates.io requires a descriptive User-Agent on all API requests.
-crates_io_user_agent := repo + '-just (+https://github.com/' + owner + '/' + repo + ')'
+# User-Agent for `crates.io`, required for API requests.
+crates_io_user_agent := 'cargo-just (+https://github.com/' + owner + '/' + repo + ')'
 
 # Return true if publish is true in Cargo.toml (supports workspace).
 cargo_is_publishable := if trim(shell('tomli query --filepath Cargo.toml workspace.package.publish 2>/dev/null || tomli query --filepath Cargo.toml package.publish 2>/dev/null || echo false')) == 'true' { 'true' } else { 'false' }
+
 # Return true if package is set using `include` in Cargo.toml (supports workspace).
 cargo_has_include := if trim(shell('tomli query --filepath Cargo.toml workspace.package.include 2>/dev/null || tomli query --filepath Cargo.toml package.include 2>/dev/null || echo false')) =~ 'Cargo' { 'true' } else { 'false' }
 
@@ -29,35 +41,23 @@ cargo_has_include := if trim(shell('tomli query --filepath Cargo.toml workspace.
 [env("GITHUB_TOKEN", github_token)]
 [group('Cargo')]
 install_cargo_tools:
-	echo {{ CYAN }}Install cargo tools{{ NORMAL }}
+	echo {{ CYAN }}Install cargo tools with {{ BOLD }}cargo-binstall{{ NORMAL }}
 
 	# Install cargo-binstall first.
-	if {{ need_binstall }} ; then \
+	if ! command -v cargo-binstall >/dev/null 2>&1; then \
 		echo {{ BLUE }}Install {{ GREEN }}cargo-binstall{{ NORMAL }}; \
 		cargo install --locked --target {{ native_target }} cargo-binstall; \
 	fi
 
-	echo {{ CYAN }}Install the required cargo tools{{ NORMAL }}
+	echo {{ dim(['Required:', GREEN + required_cargo_tools]) }}
+	echo {{ dim(['Addtional:', YELLOW + additional_cargo_tools]) }}
+
 	cargo-binstall \
 		{{ join_list(binstall_options) }} \
 		--targets {{ native_target }} \
-		{{ join_list(cargo_tools) }} \
-		{{ join_list(project_tools) }}
-
-	just update_cargo_tools
-
-	echo {{ done('') }}
-
-# Update all
-[group('Cargo')]
-update_all:
-	echo {{ BLUE }}Update all{{ NORMAL }}
-
-	just update_rust
-	just update_cargo_tools
-	just bump_cargo
-	just deny
-	-just update_actions
+		--log-level warn \
+		{{ join_list(required_cargo_tools) }} \
+		{{ join_list(additional_cargo_tools) }}
 
 	echo {{ done('') }}
 
@@ -66,19 +66,20 @@ update_all:
 update_rust:
 	echo {{ CYAN }}Update Rust{{ NORMAL }}
 
-	rustup self update
-	rustup update stable
-	rustup component add rust-analyzer
+	rustup --quiet self update >/dev/null
+	rustup --quiet update stable  >/dev/null
+	rustup --quiet component add rust-analyzer
+	rustc --version
 
 	echo {{ done('') }}
 
 # Update Cargo tools
 [group('Cargo')]
-update_cargo_tools:
+update_cargo_tools: install_cargo_tools
 	echo {{ CYAN }}Update cargo tools{{ NORMAL }}
 	echo {{ dim(['Cooldown:', GREEN + BOLD + '7', GREEN + 'days']) }}
 
-	cargo install-update --all --git --locked --cooldown 7d
+	cargo install-update --all --git --locked --cooldown 7d --quiet
 
 	echo {{ done('') }}
 
@@ -94,20 +95,15 @@ lock_cargo:
 # Bump all Cargo.lock dependencies
 [group('Cargo')]
 bump_cargo:
-	echo {{ CYAN }}Bump all {{ YELLOW }}Cargo.lock{{ CYAN }} dependencies{{ NORMAL }}
+	echo {{ CYAN }}Bump all dependencies in {{ YELLOW }}Cargo.lock{{ NORMAL }}
 
 	cargo update --verbose
 
-	echo {{ done('') }}
+	if [ -n "$(git status --porcelain Cargo.lock)" ]; then \
+		just clean_workspace; \
+	fi
 
-# Update all dependencies and actions
-[group('Cargo')]
-bump_all_deps:
-	echo {{ CYAN }}Update dependencies in {{ GREEN }}Cargo.toml{{ NORMAL }}
-
-	just bump_cargo
 	just deny
-	-just update_actions
 
 	echo {{ done('') }}
 
@@ -130,8 +126,8 @@ publish_check:
 	fi
 
 	echo {{ CYAN }}List {{ YELLOW }}non-standard{{ CYAN }} files that will be included{{ RED }}
-	-cargo package --list --allow-dirty | \
-		grep -vE '^(Cargo\.toml(\.orig)?|Cargo\.lock|\.cargo_vcs_info\.json|src/.*|LICENSE.*|README.*|[a-z]*\.svg)$'
+	-cargo package --list --allow-dirty \
+	| grep -vE '^(Cargo\.toml(\.orig)?|Cargo\.lock|\.cargo_vcs_info\.json|src/.*|LICENSE.*|README.*|[a-z]*\.svg)$'
 
 	echo {{ CYAN }}Run {{ YELLOW }}cargo publish{{ CYAN }} in {{ GREEN }}dry-run{{ NORMAL }}
 
@@ -153,13 +149,13 @@ publish: publish_check check_tag
 precommit_cargo:
 	# Check if `Cargo.toml` and `Cargo.lock` are in sync.
 	if ! cargo metadata --frozen --format-version 1 --quiet >/dev/null 2>&1; then \
-		echo "Cargo.lock is not in sync with Cargo.toml, run: just lock_cargo" >&2 && exit 1 \
-	;fi
+		echo "Cargo.lock is not in sync with Cargo.toml, run: just lock_cargo" >&2 && exit 1; \
+	fi
 
 	# Check if Rust code is formatted correctly.
 	if ! cargo fmt --all --check --quiet >/dev/null 2>&1; then \
-		echo "Rust code is incorrectly formatted, run: just format" >&2 && exit 1 \
-	;fi
+		echo "Rust code is incorrectly formatted, run: just format" >&2 && exit 1; \
+	fi
 
 # Check if this release can be tagged `v#.#.#`
 [arg('allow_dirty', long='allow-dirty', value='true')]
@@ -194,8 +190,8 @@ check_tag tag=tag allow_dirty='false':
 
 	# Local branch is remote branch.
 	git fetch --quiet origin {{ main_branch }}
-	if [ "$(git rev-parse {{ main_branch }})" != \
-		"$(git rev-parse origin/{{ main_branch }})" ]; then \
+	if [ "$(git rev-parse {{ main_branch }})" \
+		!= "$(git rev-parse origin/{{ main_branch }})" ]; then \
 		echo "{{ error(['The local', BOLD + main_branch, 'branch differs from', BOLD + 'origin/' + main_branch]) }}"; \
 		exit 1; \
 	fi
@@ -261,22 +257,23 @@ check_msrv:
 
 	echo {{ YELLOW }}MRSV:{{ GREEN + BOLD }} \
 		`cargo metadata --frozen --format-version 1 | jq -r '\
-		[.packages[].rust_version | select(. != null)] \
-		| map(split(".") | map(tonumber)) \
-		| max \
-		| map(tostring) \
-		| join(".")'`
+			[.packages[].rust_version | select(. != null)] \
+			| map(split(".") | map(tonumber)) \
+			| max \
+			| map(tostring) \
+			| join(".")'`
 
 	echo {{ NORMAL + CYAN }}Required by these crates:{{ YELLOW }}
 	cargo metadata --frozen --format-version 1 | jq -r '\
 		[.packages[] | select(.rust_version != null) | {name, version, rust_version}] \
-		| map(. + {parts: (.rust_version | split(".") | map(tonumber))}) \
+		| map(. + {parts: (.rust_version | split(".") \
+		| map(tonumber))}) \
 		| max_by(.parts) as $max \
 		| map(select(.parts == $max.parts)) \
 		| .[] \
 		| "\(.name) v\(.version) msrv:\(.rust_version)" \
 		' \
-		| column -t
+	| column -t
 
 	echo {{ NORMAL }}
 
@@ -315,9 +312,8 @@ check_crate_security crate=repo:
 		--user-agent "{{ crates_io_user_agent }}" \
 		"https://crates.io/api/v1/crates/{{ crate }}") || { \
 		echo "{{ error(['Could not find', BOLD + crate, 'on', BOLD + 'crates.io']) }}"; \
-		exit 1; \
-	} && \
-	if [ "$(printf '%s' "$crate_json" | jq -r '.crate.trustpub_only')" = "true" ]; then \
+		exit 1;} \
+	&& if [ "$(printf '%s' "$crate_json" | jq -r '.crate.trustpub_only')" = "true" ]; then \
 		echo "{{ dim(GREEN + 'Enabled') }}"; \
 	else \
 		echo "{{ error('Trusted publishing disabled') }}"; \
@@ -335,6 +331,6 @@ check_crate_security crate=repo:
 		--fail \
 		--user-agent "{{ crates_io_user_agent }}" \
 		--header "Authorization: {{ crates_io_token }}" \
-		"https://crates.io/api/v1/trusted_publishing/github_configs?crate={{ crate }}" | \
-			jq -r '.github_configs[] | \
-				"Repository: \(.repository_owner)/\(.repository_name)\nWorkflow: \(.workflow_filename)\nEnvironment: \(.environment // "any")\n"'
+		"https://crates.io/api/v1/trusted_publishing/github_configs?crate={{ crate }}" \
+	| jq -r '.github_configs[] \
+	| "Repository: \(.repository_owner)/\(.repository_name)\nWorkflow: \(.workflow_filename)\nEnvironment: \(.environment // "any")\n"'
