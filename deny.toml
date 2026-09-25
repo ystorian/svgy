@@ -32,6 +32,4 @@ allow = [
 ]
 
 [advisories]
-ignore = [
-	{ id = "RUSTSEC-2024-0436", reason = "paste is unmaintained, oxvg_optimiser -> oxvg_ast -> paste" },
-]
+ignore = [{ id = "RUSTSEC-2024-0436", reason = "paste is unmaintained in oxvg_optimiser v0.8.0" }]
