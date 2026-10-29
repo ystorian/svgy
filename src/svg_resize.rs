@@ -1,3 +1,5 @@
+// src/svg_resize.rs
+
 //! Resize an SVG by baking a uniform scale into the document.
 //!
 //! The output (a) rewrites the root `viewBox`, (b) drops the root `width`/`height`, and (c) uses
@@ -9,23 +11,28 @@
 //! The canvas is padded to the requested size unless [`Canvas::Tight`] is asked for. The artwork is
 //! centered in it by [`crate::affine`], and the `viewBox` always starts at `0 0`.
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context as _, Result, anyhow, bail};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
 use quick_xml::writer::Writer;
-use std::collections::HashSet;
 
 use crate::affine;
 use crate::cli::Target;
 use crate::numeric::{fmt_num, parse_num_list, parse_px};
 
+/// What the resize writes while it copies the SVG.
 struct State {
+	/// Whether the root `<svg>` was seen.
 	seen_root: bool,
+	/// Factor applied to the artwork.
 	scale: f64,
-	/// Translation that centers the scaled artwork on the canvas.
+	/// Horizontal translation that centers the artwork.
 	tx: f64,
+	/// Vertical part of the translation.
 	ty: f64,
+	/// The `viewBox` to write on the root.
 	new_viewbox: String,
+	/// Whether the root has no `viewBox` yet.
 	add_viewbox: bool,
 }
 
@@ -51,7 +58,7 @@ pub fn transform_svg(src: &str, target: Target, canvas: Canvas) -> Result<String
 		add_viewbox: false,
 	};
 
-	let templates = use_targets(src)?;
+	let templates = affine::use_targets(src)?;
 	// Depth inside a template: it is placed by the `<use>` that carries the translation, so its own
 	// coordinates are only scaled.
 	let mut template = 0usize;
@@ -59,73 +66,41 @@ pub fn transform_svg(src: &str, target: Target, canvas: Canvas) -> Result<String
 	loop {
 		match reader.read_event().context("parsing SVG")? {
 			Event::Eof => break,
-			Event::Start(e) => {
+			Event::Start(element) => {
 				if template > 0 {
 					template += 1;
-				} else if state.seen_root && is_template(&e, &templates)? {
+				} else if state.seen_root && affine::is_template(&element, &templates)? {
 					template = 1;
 				}
-				let out = process_element(&e, &mut state, target, canvas, template == 0)?;
+				let out = process_element(&element, &mut state, target, canvas, template == 0)?;
 				writer.write_event(Event::Start(out))?;
 			}
-			Event::End(e) => {
+			Event::End(element) => {
 				template = template.saturating_sub(1);
-				writer.write_event(Event::End(e))?;
+				writer.write_event(Event::End(element))?;
 			}
-			Event::Empty(e) => {
-				let inside = template > 0 || (state.seen_root && is_template(&e, &templates)?);
-				let out = process_element(&e, &mut state, target, canvas, !inside)?;
+			Event::Empty(element) => {
+				let inside =
+					template > 0 || (state.seen_root && affine::is_template(&element, &templates)?);
+				let out = process_element(&element, &mut state, target, canvas, !inside)?;
 				writer.write_event(Event::Empty(out))?;
 			}
 			other => writer.write_event(other)?,
 		}
 	}
 
-	Ok(String::from_utf8(writer.into_inner())?)
-}
-
-/// Ids that a `<use>` instantiates, `<use href="#logo">` -> `logo`.
-fn use_targets(src: &str) -> Result<HashSet<String>> {
-	let mut reader = Reader::from_str(src);
-	let mut ids = HashSet::new();
-	loop {
-		let e = match reader.read_event().context("parsing SVG")? {
-			Event::Eof => break,
-			Event::Start(e) | Event::Empty(e) => e,
-			_ => continue,
-		};
-		if e.local_name().into_inner() != "use" {
-			continue;
-		}
-		for key in ["href", "xlink:href"] {
-			if let Some(href) = attr_value(&e, key)?
-				&& let Some(id) = href.trim().strip_prefix('#')
-			{
-				ids.insert(id.to_string());
-			}
-		}
-	}
-	Ok(ids)
-}
-
-/// A `<symbol>`, or anything a `<use>` refers to: its coordinates are relative to where the
-/// instance is placed, so a translation must not reach them.
-fn is_template(e: &BytesStart, templates: &HashSet<String>) -> Result<bool> {
-	if e.local_name().into_inner() == "symbol" {
-		return Ok(true);
-	}
-	Ok(attr_value(e, "id")?.is_some_and(|id| templates.contains(&id)))
+	return Ok(String::from_utf8(writer.into_inner())?);
 }
 
 /// Rebuild one element with its coordinates scaled.
 fn process_element(
-	e: &BytesStart,
+	element: &BytesStart,
 	state: &mut State,
 	target: Target,
 	canvas: Canvas,
 	translate: bool,
 ) -> Result<BytesStart<'static>> {
-	let local = e.local_name().into_inner().to_string();
+	let local = element.local_name().into_inner().to_owned();
 
 	let is_root = !state.seen_root;
 	if is_root {
@@ -133,18 +108,18 @@ fn process_element(
 		if local != "svg" {
 			bail!("root element is <{local}>, expected <svg>");
 		}
-		let (min_x, min_y, w, h, has_vb) = read_source_box(e)?;
-		state.scale = compute_scale(target, w, h);
-		let s = state.scale;
+		let (min_x, min_y, w, height, has_vb) = read_source_box(element)?;
+		state.scale = compute_scale(target, w, height);
+		let scale = state.scale;
 		let (want_w, want_h) = target.canvas();
-		let (vw, tx) = place_axis(min_x * s, w * s, want_w, canvas);
-		let (vh, ty) = place_axis(min_y * s, h * s, want_h, canvas);
+		let (vw, tx) = place_axis(min_x * scale, w * scale, want_w, canvas);
+		let (vh, ty) = place_axis(min_y * scale, height * scale, want_h, canvas);
 		state.tx = tx;
 		state.ty = ty;
 		state.new_viewbox = format!("0 0 {} {}", fmt_num(vw), fmt_num(vh));
 		state.add_viewbox = !has_vb;
 	}
-	let s = state.scale;
+	let scale = state.scale;
 	let (tx, ty) = if translate {
 		(state.tx, state.ty)
 	} else {
@@ -164,18 +139,18 @@ fn process_element(
 		} else {
 			"gradientUnits"
 		};
-		attr_value(e, key)?.as_deref() == Some("userSpaceOnUse")
+		affine::attr_value(element, key)?.as_deref() == Some("userSpaceOnUse")
 	} else {
 		true
 	};
 
-	let name = e.name().into_inner().to_string();
+	let name = element.name().into_inner().to_owned();
 	let mut out = BytesStart::new(name);
 	let mut seen_keys = Vec::new();
 
-	for attr in e.attributes() {
+	for attr in element.attributes() {
 		let attr = attr.map_err(|err| anyhow!("attribute: {err}"))?;
-		let key = attr.key.into_inner().to_string();
+		let key = attr.key.into_inner().to_owned();
 		let val = attr
 			.normalized_value(quick_xml::XmlVersion::Implicit1_0)?
 			.into_owned();
@@ -183,13 +158,16 @@ fn process_element(
 		if is_root && (key == "width" || key == "height") {
 			continue; // dropped: intrinsic size now comes from viewBox
 		}
+		if is_root && (key == "x" || key == "y") {
+			continue; // ignored on the outermost <svg>
+		}
 		if is_root && key == "viewBox" {
 			out.push_attribute(("viewBox", state.new_viewbox.as_str()));
 			continue;
 		}
 
 		let new_val = if do_scale {
-			affine::attr(&key, &val, s, tx, ty)
+			affine::attr(&key, &val, scale, tx, ty)
 		} else {
 			val
 		};
@@ -200,7 +178,7 @@ fn process_element(
 	// An omitted `x` means 0, which the translation moves like any other coordinate.
 	if do_scale && !is_root && (tx != 0.0 || ty != 0.0) {
 		for key in affine::implicit_origins(&local) {
-			if !seen_keys.iter().any(|k| k == key) {
+			if !seen_keys.iter().any(|seen| return seen == key) {
 				let val = affine::origin_value(key, tx, ty);
 				out.push_attribute((*key, val.as_str()));
 			}
@@ -211,23 +189,26 @@ fn process_element(
 		out.push_attribute(("viewBox", state.new_viewbox.as_str()));
 	}
 
-	Ok(out)
+	return Ok(out);
 }
 
 /// Source coordinate box: `(min_x, min_y, w, h, had_viewBox)`.
-fn read_source_box(e: &BytesStart) -> Result<(f64, f64, f64, f64, bool)> {
-	if let Some(vb) = attr_value(e, "viewBox")? {
+fn read_source_box(element: &BytesStart) -> Result<(f64, f64, f64, f64, bool)> {
+	if let Some(vb) = affine::attr_value(element, "viewBox")? {
 		let nums = parse_num_list(&vb);
 		if nums.len() != 4 {
 			bail!("viewBox must have 4 numbers, got {}", nums.len());
 		}
 		return Ok((nums[0], nums[1], nums[2], nums[3], true));
 	}
-	match (attr_value(e, "width")?, attr_value(e, "height")?) {
-		(Some(w), Some(h)) => {
+	match (
+		affine::attr_value(element, "width")?,
+		affine::attr_value(element, "height")?,
+	) {
+		(Some(w), Some(height)) => {
 			let w = parse_px(&w).context("root width")?;
-			let h = parse_px(&h).context("root height")?;
-			Ok((0.0, 0.0, w, h, false))
+			let height = parse_px(&height).context("root height")?;
+			return Ok((0.0, 0.0, w, height, false));
 		}
 		_ => bail!("root <svg> has neither viewBox nor numeric width/height; cannot resize"),
 	}
@@ -256,32 +237,20 @@ fn place_axis(start: f64, extent: f64, want: Option<f64>, canvas: Canvas) -> (f6
 	if rounded >= lo - EDGE_EPS && rounded <= hi + EDGE_EPS {
 		return (len, rounded);
 	}
-	(len, centered)
+	return (len, centered);
 }
 
+/// Scale factor that fits the target size.
 fn compute_scale(target: Target, w0: f64, h0: f64) -> f64 {
 	match target {
-		Target::Square(n) => f64::from(n) / w0.max(h0),
-		Target::Width(w) => f64::from(w) / w0,
-		Target::Height(h) => f64::from(h) / h0,
-		Target::Both(w, h) => (f64::from(w) / w0).min(f64::from(h) / h0),
+		Target::Square(n) => return f64::from(n) / w0.max(h0),
+		Target::Width(w) => return f64::from(w) / w0,
+		Target::Height(height) => return f64::from(height) / h0,
+		Target::Both(w, height) => return (f64::from(w) / w0).min(f64::from(height) / h0),
 	}
 }
 
 /// First matching attribute value, unescaped.
-fn attr_value(e: &BytesStart, key: &str) -> Result<Option<String>> {
-	for attr in e.attributes() {
-		let attr = attr.map_err(|err| anyhow!("attribute: {err}"))?;
-		if attr.key.as_ref() == key {
-			return Ok(Some(
-				attr.normalized_value(quick_xml::XmlVersion::Implicit1_0)?
-					.into_owned(),
-			));
-		}
-	}
-	Ok(None)
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -375,5 +344,16 @@ mod tests {
 		let out = transform_svg(src, Target::Square(20), Canvas::Padded).unwrap();
 		// default objectBoundingBox: gradient coords stay as 0..1 ratios
 		assert!(out.contains(r#"x2="1""#));
+	}
+
+	/// The outermost `<svg>` ignores `x`/`y`, so they must not be translated.
+	#[test]
+	fn root_position_is_dropped() {
+		let src = r#"<svg xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" viewBox="0 0 200 100"><rect width="10" height="10"/></svg>"#;
+		let out = transform_svg(src, Target::Square(200), Canvas::Padded).unwrap();
+		assert!(
+			out.starts_with(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">"#),
+			"{out}"
+		);
 	}
 }

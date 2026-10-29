@@ -1,3 +1,5 @@
+// src/svg_image.rs
+
 //! Remove `<image>` from an SVG document.
 //!
 //! resvg is built without its `raster-images` feature (see `Cargo.toml`), so a bitmap never
@@ -8,7 +10,7 @@
 //! Unlike text, an image cannot be converted to paths by svgy, so the caller stops. `--strip-images`
 //! removes the element instead and converts the vector artwork that remains.
 
-use anyhow::{Context, Result};
+use anyhow::{Context as _, Result};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
 use quick_xml::writer::Writer;
@@ -27,22 +29,23 @@ pub fn strip_images(src: &str) -> Result<(String, bool)> {
 		match reader.read_event().context("parsing SVG")? {
 			Event::Eof => break,
 			// Skipping to the matching end tag takes the whole subtree with it.
-			Event::Start(e) if is_image(&e) => {
+			Event::Start(element) if is_image(&element) => {
 				reader
-					.read_to_end(e.name())
+					.read_to_end(element.name())
 					.context("unterminated <image> element")?;
 				removed = true;
 			}
-			Event::Empty(e) if is_image(&e) => removed = true,
+			Event::Empty(element) if is_image(&element) => removed = true,
 			other => writer.write_event(other)?,
 		}
 	}
 
-	Ok((String::from_utf8(writer.into_inner())?, removed))
+	return Ok((String::from_utf8(writer.into_inner())?, removed));
 }
 
-fn is_image(e: &BytesStart) -> bool {
-	e.local_name().as_ref() == "image"
+/// Whether the element is an `<image>`.
+fn is_image(element: &BytesStart) -> bool {
+	return element.local_name().as_ref() == "image";
 }
 
 #[cfg(test)]

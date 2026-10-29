@@ -1,3 +1,5 @@
+// src/icns/mod.rs
+
 //! Apple Icon Image Format (.icns) writer.
 //!
 //! Ported from sveinbjornt/createicns: 16x16 and 32x32 icons are stored as `ic04`/`ic05` (ARGB with
@@ -7,24 +9,30 @@
 
 mod packbits;
 
-use anyhow::{Context, Result};
+use anyhow::{Context as _, Result};
 use packbits::rle_encode_channel;
 use resvg::{tiny_skia, usvg};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::io::Write;
+use std::fs::File;
+use std::io::Write as _;
 use std::path::Path;
 
 use crate::{optimize, render};
 
+/// File signature at the start of an icns file.
 const MAGIC: &[u8; 4] = b"icns";
+/// Prefix of an ARGB-RLE chunk payload.
 const ARGB_MAGIC: &[u8; 4] = b"ARGB";
 
 /// One chunk of the icns file: `OSType`, the pixel side length to render, and whether it is stored
 /// as ARGB-RLE (small icons) or embedded PNG.
 struct IconSpec {
+	/// Four-byte chunk type.
 	ostype: &'static [u8; 4],
+	/// Side length in pixels.
 	px: u32,
+	/// Store as ARGB-RLE, else as PNG.
 	argb: bool,
 }
 
@@ -99,8 +107,8 @@ pub fn write_icns(tree: &usvg::Tree, opt: optimize::Opts, out: &Path) -> Result<
 
 	for spec in SPECS {
 		let pixmap = match pixmap_cache.entry(spec.px) {
-			Entry::Occupied(e) => e.into_mut(),
-			Entry::Vacant(e) => e.insert(render::render_size(tree, spec.px, spec.px)?),
+			Entry::Occupied(entry) => entry.into_mut(),
+			Entry::Vacant(entry) => entry.insert(render::render_size(tree, spec.px, spec.px)?),
 		};
 		if spec.argb {
 			let data = encode_argb_chunk(pixmap);
@@ -121,12 +129,11 @@ pub fn write_icns(tree: &usvg::Tree, opt: optimize::Opts, out: &Path) -> Result<
 
 	// File = "icns" magic + total size (incl. these 8 bytes) + chunks.
 	let total = u32::try_from(8 + chunks.len()).context("icns file exceeds 4 GiB")?;
-	let mut file =
-		std::fs::File::create(out).with_context(|| format!("creating {}", out.display()))?;
+	let mut file = File::create(out).with_context(|| format!("creating {}", out.display()))?;
 	file.write_all(MAGIC)?;
 	file.write_all(&total.to_be_bytes())?;
 	file.write_all(&chunks)?;
-	Ok(())
+	return Ok(());
 }
 
 /// Append `OSType + big-endian (len + 8) + data` to the chunk buffer.
@@ -141,25 +148,25 @@ fn write_chunk(buf: &mut Vec<u8>, ostype: [u8; 4], data: &[u8]) {
 /// PackBits-RLE encoded. Alpha is straight (non-premultiplied).
 fn encode_argb_chunk(pixmap: &tiny_skia::Pixmap) -> Vec<u8> {
 	let count = (pixmap.width() * pixmap.height()) as usize;
-	let (mut a, mut r, mut g, mut b) = (
+	let (mut alpha, mut red, mut green, mut blue) = (
 		Vec::with_capacity(count),
 		Vec::with_capacity(count),
 		Vec::with_capacity(count),
 		Vec::with_capacity(count),
 	);
 	for px in pixmap.pixels() {
-		let c = px.demultiply();
-		a.push(c.alpha());
-		r.push(c.red());
-		g.push(c.green());
-		b.push(c.blue());
+		let color = px.demultiply();
+		alpha.push(color.alpha());
+		red.push(color.red());
+		green.push(color.green());
+		blue.push(color.blue());
 	}
 
 	let mut data = Vec::new();
 	data.extend_from_slice(ARGB_MAGIC);
-	data.extend_from_slice(&rle_encode_channel(&a));
-	data.extend_from_slice(&rle_encode_channel(&r));
-	data.extend_from_slice(&rle_encode_channel(&g));
-	data.extend_from_slice(&rle_encode_channel(&b));
-	data
+	data.extend_from_slice(&rle_encode_channel(&alpha));
+	data.extend_from_slice(&rle_encode_channel(&red));
+	data.extend_from_slice(&rle_encode_channel(&green));
+	data.extend_from_slice(&rle_encode_channel(&blue));
+	return data;
 }

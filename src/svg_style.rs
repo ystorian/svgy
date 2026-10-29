@@ -1,3 +1,5 @@
+// src/svg_style.rs
+
 //! Round the opacity declarations of a `style` attribute.
 //!
 //! `cleanup_numeric_values` rounds attributes, and `convert_style_to_attrs` moves a declaration to
@@ -7,7 +9,7 @@
 //! An opacity holds a fraction of 0 to 1, so three decimals name every step the eye can tell apart.
 //! A length has no such limit, and the precision search is what decides those.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context as _, Result, anyhow};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
 use quick_xml::writer::Writer;
@@ -34,20 +36,20 @@ pub fn round_opacities(src: &str) -> Result<String> {
 	loop {
 		match reader.read_event().context("parsing SVG")? {
 			Event::Eof => break,
-			Event::Start(e) => writer.write_event(Event::Start(rounded(&e)?))?,
-			Event::Empty(e) => writer.write_event(Event::Empty(rounded(&e)?))?,
+			Event::Start(element) => writer.write_event(Event::Start(rounded(&element)?))?,
+			Event::Empty(element) => writer.write_event(Event::Empty(rounded(&element)?))?,
 			other => writer.write_event(other)?,
 		}
 	}
 
-	Ok(String::from_utf8(writer.into_inner())?)
+	return Ok(String::from_utf8(writer.into_inner())?);
 }
 
 /// Rewrite one element with its opacities rounded.
-fn rounded(e: &BytesStart) -> Result<BytesStart<'static>> {
-	let mut out = BytesStart::new(e.name().into_inner().to_string());
+fn rounded(element: &BytesStart) -> Result<BytesStart<'static>> {
+	let mut out = BytesStart::new(element.name().into_inner().to_owned());
 
-	for attr in e.attributes() {
+	for attr in element.attributes() {
 		let attr = attr.map_err(|err| anyhow!("attribute: {err}"))?;
 		let key = attr.key.into_inner();
 		let val = attr
@@ -59,22 +61,24 @@ fn rounded(e: &BytesStart) -> Result<BytesStart<'static>> {
 			out.push_attribute((key, val.as_str()));
 		}
 	}
-	Ok(out)
+	return Ok(out);
 }
 
 /// Round the opacities of one `style` value, and leave every other declaration as it is.
 fn round_declarations(style: &str) -> String {
-	style
+	return style
 		.split(';')
 		.map(str::trim)
-		.filter(|d| !d.is_empty())
+		.filter(|declaration| return !declaration.is_empty())
 		.map(|declaration| match declaration.split_once(':') {
-			Some((name, value)) => round_one(name.trim(), value.trim())
-				.unwrap_or_else(|| format!("{}:{}", name.trim(), value.trim())),
-			None => declaration.to_string(),
+			Some((name, value)) => {
+				return round_one(name.trim(), value.trim())
+					.unwrap_or_else(|| format!("{}:{}", name.trim(), value.trim()));
+			}
+			None => return declaration.to_owned(),
 		})
 		.collect::<Vec<_>>()
-		.join(";")
+		.join(";");
 }
 
 /// One declaration, rounded. `None` when this one keeps its value.
@@ -91,7 +95,7 @@ fn round_one(name: &str, value: &str) -> Option<String> {
 	let scale = f64::from(10_i32.pow(u32::try_from(DECIMALS).ok()?));
 	let short = fmt_num((number * scale).round() / scale);
 	// A value that is already short keeps its own spelling.
-	(short.len() < value.len()).then(|| format!("{name}:{short}"))
+	return (short.len() < value.len()).then(|| format!("{name}:{short}"));
 }
 
 #[cfg(test)]

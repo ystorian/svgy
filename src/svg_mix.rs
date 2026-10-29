@@ -1,3 +1,5 @@
+// src/svg_mix.rs
+
 //! Write each element at its own precision.
 //!
 //! The precision search turns one knob for the whole document, so every element carries the
@@ -9,7 +11,9 @@
 //! Which element pays is estimated, not measured: the estimate only sets the order of the tries, and
 //! a render of the whole document decides whether the result is inside the budget.
 
-use anyhow::{Context, Result, anyhow};
+use std::cmp::Reverse;
+
+use anyhow::{Context as _, Result, anyhow};
 use oxvg_path::{Path, command::Data, parser::Parse as _};
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
@@ -22,6 +26,7 @@ const NAMES: &[&str] = &["id", "href", "xlink:href", "class"];
 
 /// What the mix settled on.
 pub struct Mixed {
+	/// The mixed SVG.
 	pub svg: String,
 	/// Rendered difference against the source, 0..1.
 	pub difference: f64,
@@ -31,9 +36,11 @@ pub struct Mixed {
 
 /// The elements of one candidate.
 struct Doc<'a> {
+	/// The candidate source.
 	src: &'a str,
 	/// The span of each start tag, in document order.
 	spans: Vec<(usize, usize)>,
+	/// The local name of each element.
 	names: Vec<String>,
 	/// The attribute names of each element, and the values that name another element.
 	shapes: Vec<Vec<(String, Option<String>)>>,
@@ -44,6 +51,7 @@ struct Doc<'a> {
 }
 
 impl<'a> Doc<'a> {
+	/// Index the elements of `src`.
 	fn parse(src: &'a str) -> Result<Self> {
 		let mut reader = Reader::from_str(src);
 		let mut doc = Self {
@@ -61,10 +69,10 @@ impl<'a> Doc<'a> {
 			let event = reader.read_event().context("parsing SVG")?;
 			let end = usize::try_from(reader.buffer_position())?;
 
-			let (e, opens) = match event {
+			let (elem, opens) = match event {
 				Event::Eof => break,
-				Event::Start(e) => (e, true),
-				Event::Empty(e) => (e, false),
+				Event::Start(elem) => (elem, true),
+				Event::Empty(elem) => (elem, false),
 				Event::End(_) => {
 					depth = depth.saturating_sub(1);
 					continue;
@@ -73,39 +81,42 @@ impl<'a> Doc<'a> {
 			};
 
 			let mut shape = Vec::new();
-			let mut d = None;
-			for attr in e.attributes() {
+			let mut path = None;
+			for attr in elem.attributes() {
 				let attr = attr.map_err(|err| anyhow!("attribute: {err}"))?;
-				let key = attr.key.into_inner().to_string();
+				let key = attr.key.into_inner().to_owned();
 				let value = attr
 					.normalized_value(quick_xml::XmlVersion::Implicit1_0)?
 					.into_owned();
 				if key == "d" {
-					d = Some(value.clone());
+					path = Some(value.clone());
 				}
 				let named = NAMES.contains(&key.as_str()).then_some(value);
 				shape.push((key, named));
 			}
 
 			doc.spans.push((start, end));
-			doc.names.push(e.local_name().into_inner().to_string());
+			doc.names.push(elem.local_name().into_inner().to_owned());
 			doc.shapes.push(shape);
 			doc.depths.push(depth);
-			doc.paths.push(d);
+			doc.paths.push(path);
 			if opens {
 				depth += 1;
 			}
 		}
-		Ok(doc)
+		return Ok(doc);
 	}
 
+	/// Source of the element's start tag.
+	#[expect(clippy::string_slice, reason = "parser offsets are char boundaries")]
 	fn tag(&self, element: usize) -> &'a str {
 		let (start, end) = self.spans[element];
-		&self.src[start..end]
+		return &self.src[start..end];
 	}
 
+	/// Number of elements.
 	fn len(&self) -> usize {
-		self.spans.len()
+		return self.spans.len();
 	}
 }
 
@@ -113,8 +124,11 @@ impl<'a> Doc<'a> {
 ///
 /// The names and the nesting must match, and so must every attribute name. An attribute that names
 /// another element must also hold the same name, since a mix moves attributes and not references.
-fn aligned(a: &Doc, b: &Doc) -> bool {
-	a.len() == b.len() && a.names == b.names && a.depths == b.depths && a.shapes == b.shapes
+fn aligned(left: &Doc, right: &Doc) -> bool {
+	return left.len() == right.len()
+		&& left.names == right.names
+		&& left.depths == right.depths
+		&& left.shapes == right.shapes;
 }
 
 /// Mix `candidates`, which are one document at rising precision, `candidates[0]` being the lowest.
@@ -132,9 +146,9 @@ pub fn mix(
 	}
 	let docs: Vec<Doc> = candidates
 		.iter()
-		.map(|c| Doc::parse(c))
+		.map(|candidate| return Doc::parse(candidate))
 		.collect::<Result<_>>()?;
-	if docs.iter().any(|d| !aligned(&docs[0], d)) {
+	if docs.iter().any(|doc| return !aligned(&docs[0], doc)) {
 		return Ok(None);
 	}
 
@@ -160,7 +174,9 @@ pub fn mix(
 			let upgrades = choice
 				.iter()
 				.enumerate()
-				.filter(|&(element, &level)| docs[level].tag(element) != docs[0].tag(element))
+				.filter(|&(element, &level)| {
+					return docs[level].tag(element) != docs[0].tag(element);
+				})
 				.count();
 			return Ok(Some(Mixed {
 				svg,
@@ -171,15 +187,15 @@ pub fn mix(
 
 		// The next try is the element that buys the most accuracy for the fewest bytes.
 		let next = (0..choice.len())
-			.filter(|&e| choice[e] < top)
-			.filter(|&e| weights[e] > 0.0)
-			.max_by(|&a, &b| {
-				let rate = |e: usize| {
-					#[allow(clippy::cast_precision_loss)]
-					let bytes = cost(&docs, e, choice[e]).max(1) as f64;
-					weights[e] / bytes
+			.filter(|&element| return choice[element] < top)
+			.filter(|&element| return weights[element] > 0.0)
+			.max_by(|&left, &right| {
+				let rate = |element: usize| {
+					#[expect(clippy::cast_precision_loss, reason = "byte counts are exact in f64")]
+					let bytes = cost(&docs, element, choice[element]).max(1) as f64;
+					return weights[element] / bytes;
 				};
-				rate(a).total_cmp(&rate(b))
+				return rate(left).total_cmp(&rate(right));
 			});
 
 		match next {
@@ -202,17 +218,19 @@ pub fn mix(
 			None => return Ok(None),
 		}
 	}
-	Ok(None)
+	return Ok(None);
 }
 
 /// The bytes an upgrade of `element` from `level` to the next one costs.
 fn cost(docs: &[Doc], element: usize, level: usize) -> isize {
 	let now = docs[level].tag(element).len();
 	let next = docs[level + 1].tag(element).len();
-	next.cast_signed() - now.cast_signed()
+	return next.cast_signed() - now.cast_signed();
 }
 
 /// The document with every element written at the level `choice` names.
+/// The base source, each tag taken from its chosen level.
+#[expect(clippy::string_slice, reason = "parser offsets are char boundaries")]
 fn splice(docs: &[Doc], choice: &[usize]) -> String {
 	let base = &docs[0];
 	let mut out = String::with_capacity(base.src.len());
@@ -225,7 +243,7 @@ fn splice(docs: &[Doc], choice: &[usize]) -> String {
 		last = end;
 	}
 	out.push_str(&base.src[last..]);
-	out
+	return out;
 }
 
 /// What every element stands to gain from another decimal.
@@ -237,33 +255,35 @@ fn weights(doc: &Doc) -> Vec<f64> {
 	let mut own: Vec<f64> = doc
 		.paths
 		.iter()
-		.map(|d| d.as_deref().map_or(0.0, edge_length))
+		.map(|path| return path.as_deref().map_or(0.0, edge_length))
 		.collect();
 
 	// Deepest first, so a child is counted before the container that holds it.
 	let mut order: Vec<usize> = (0..doc.len()).collect();
-	order.sort_by_key(|&e| std::cmp::Reverse(doc.depths[e]));
+	order.sort_by_key(|&element| return Reverse(doc.depths[element]));
 	for element in order {
 		let mine = own[element];
 		if let Some(parent) = parent_of(doc, element) {
 			own[parent] += mine;
 		}
 	}
-	own
+	return own;
 }
 
 /// The element that holds `element`, which is the closest one before it that is less deep.
 fn parent_of(doc: &Doc, element: usize) -> Option<usize> {
 	let depth = doc.depths[element];
-	(0..element).rev().find(|&e| doc.depths[e] < depth)
+	return (0..element)
+		.rev()
+		.find(|&other| return doc.depths[other] < depth);
 }
 
 /// The length of the outline of a path.
 ///
 /// A curve counts as the line through its control points, and an arc as its chord. Both are
 /// estimates, and an estimate is all that the order of the tries needs.
-fn edge_length(d: &str) -> f64 {
-	let Ok(path) = Path::parse_string(d) else {
+fn edge_length(source: &str) -> f64 {
+	let Ok(path) = Path::parse_string(source) else {
 		return 0.0;
 	};
 	let mut length = 0.0;
@@ -291,30 +311,30 @@ fn edge_length(d: &str) -> f64 {
 		};
 		// The points the command passes through, its control points included.
 		let points: Vec<(f64, f64)> = match data {
-			Data::MoveTo(a) | Data::MoveBy(a) => {
-				(x, y) = (ox + a[0], oy + a[1]);
+			Data::MoveTo(args) | Data::MoveBy(args) => {
+				(x, y) = (ox + args[0], oy + args[1]);
 				(sx, sy) = (x, y);
 				continue;
 			}
 			Data::ClosePath => vec![(sx, sy)],
-			Data::LineTo(a)
-			| Data::LineBy(a)
-			| Data::SmoothQuadraticBezierTo(a)
-			| Data::SmoothQuadraticBezierBy(a) => vec![(ox + a[0], oy + a[1])],
-			Data::HorizontalLineTo(a) | Data::HorizontalLineBy(a) => vec![(ox + a[0], y)],
-			Data::VerticalLineTo(a) | Data::VerticalLineBy(a) => vec![(x, oy + a[0])],
-			Data::CubicBezierTo(a) | Data::CubicBezierBy(a) => vec![
-				(ox + a[0], oy + a[1]),
-				(ox + a[2], oy + a[3]),
-				(ox + a[4], oy + a[5]),
+			Data::LineTo(args)
+			| Data::LineBy(args)
+			| Data::SmoothQuadraticBezierTo(args)
+			| Data::SmoothQuadraticBezierBy(args) => vec![(ox + args[0], oy + args[1])],
+			Data::HorizontalLineTo(args) | Data::HorizontalLineBy(args) => vec![(ox + args[0], y)],
+			Data::VerticalLineTo(args) | Data::VerticalLineBy(args) => vec![(x, oy + args[0])],
+			Data::CubicBezierTo(args) | Data::CubicBezierBy(args) => vec![
+				(ox + args[0], oy + args[1]),
+				(ox + args[2], oy + args[3]),
+				(ox + args[4], oy + args[5]),
 			],
-			Data::SmoothBezierTo(a)
-			| Data::SmoothBezierBy(a)
-			| Data::QuadraticBezierTo(a)
-			| Data::QuadraticBezierBy(a) => {
-				vec![(ox + a[0], oy + a[1]), (ox + a[2], oy + a[3])]
+			Data::SmoothBezierTo(args)
+			| Data::SmoothBezierBy(args)
+			| Data::QuadraticBezierTo(args)
+			| Data::QuadraticBezierBy(args) => {
+				vec![(ox + args[0], oy + args[1]), (ox + args[2], oy + args[3])]
 			}
-			Data::ArcTo(a) | Data::ArcBy(a) => vec![(ox + a[5], oy + a[6])],
+			Data::ArcTo(args) | Data::ArcBy(args) => vec![(ox + args[5], oy + args[6])],
 			Data::Implicit(_) => continue,
 		};
 
@@ -323,7 +343,7 @@ fn edge_length(d: &str) -> f64 {
 			(x, y) = (px, py);
 		}
 	}
-	length
+	return length;
 }
 
 #[cfg(test)]
@@ -344,14 +364,10 @@ mod tests {
 	#[test]
 	fn the_first_try_is_every_element_at_the_lowest_precision() {
 		let mut seen = Vec::new();
-		let out = mix(
-			&[LOW.to_string(), HIGH.to_string()],
-			1.0,
-			&mut |svg: &str| {
-				seen.push(svg.to_string());
-				Ok(Some(0.5))
-			},
-		)
+		let out = mix(&[LOW.to_owned(), HIGH.to_owned()], 1.0, &mut |svg: &str| {
+			seen.push(svg.to_owned());
+			return Ok(Some(0.5));
+		})
 		.unwrap()
 		.unwrap();
 		assert_eq!(seen.len(), 1);
@@ -364,19 +380,15 @@ mod tests {
 	#[test]
 	fn the_longest_edge_is_upgraded_first() {
 		let mut seen = Vec::new();
-		let out = mix(
-			&[LOW.to_string(), HIGH.to_string()],
-			0.1,
-			&mut |svg: &str| {
-				seen.push(svg.to_string());
-				// Only the document that holds the long path at the high precision is good enough.
-				Ok(Some(if svg.contains("M0.25 0.25") {
-					0.05
-				} else {
-					0.5
-				}))
-			},
-		)
+		let out = mix(&[LOW.to_owned(), HIGH.to_owned()], 0.1, &mut |svg: &str| {
+			seen.push(svg.to_owned());
+			// Only the document that holds the long path at the high precision is good enough.
+			return Ok(Some(if svg.contains("M0.25 0.25") {
+				0.05
+			} else {
+				0.5
+			}));
+		})
 		.unwrap()
 		.unwrap();
 		assert_eq!(seen.len(), 2, "{seen:#?}");
@@ -389,8 +401,8 @@ mod tests {
 	/// A budget that no mix reaches gives up, and the caller keeps the choice of the search.
 	#[test]
 	fn an_unreachable_budget_gives_up() {
-		let out = mix(&[LOW.to_string(), HIGH.to_string()], -1.0, &mut |_| {
-			Ok(Some(0.5))
+		let out = mix(&[LOW.to_owned(), HIGH.to_owned()], -1.0, &mut |_| {
+			return Ok(Some(0.5));
 		})
 		.unwrap();
 		assert!(out.is_none());
@@ -402,8 +414,8 @@ mod tests {
 		let other = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
 	<path d="M0 0h100v100H0Z"/>
 </svg>"#;
-		let out = mix(&[LOW.to_string(), other.to_string()], 1.0, &mut |_| {
-			Ok(Some(0.0))
+		let out = mix(&[LOW.to_owned(), other.to_owned()], 1.0, &mut |_| {
+			return Ok(Some(0.0));
 		})
 		.unwrap();
 		assert!(out.is_none());
@@ -414,8 +426,8 @@ mod tests {
 	fn a_moved_reference_is_refused() {
 		let low = r#"<svg xmlns="http://www.w3.org/2000/svg"><path id="a" d="M0 0h1"/></svg>"#;
 		let high = r#"<svg xmlns="http://www.w3.org/2000/svg"><path id="b" d="M0 0h1.5"/></svg>"#;
-		let out = mix(&[low.to_string(), high.to_string()], 1.0, &mut |_| {
-			Ok(Some(0.0))
+		let out = mix(&[low.to_owned(), high.to_owned()], 1.0, &mut |_| {
+			return Ok(Some(0.0));
 		})
 		.unwrap();
 		assert!(out.is_none());

@@ -2,7 +2,7 @@
 
 [package]
 name = "svgy"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2024"
 description = "Convert an SVG to optimized icons for all platforms"
 license = "MIT OR Apache-2.0"
@@ -11,7 +11,7 @@ readme = "README.md"
 categories = ["development-tools", "command-line-utilities", "multimedia::images"]
 keywords = ["svg", "ico", "icon"]
 publish = true
-include = ["src/**/*.rs", "Cargo.toml", "Cargo.lock", "README.md", "/*.svg", "LICENSE-*"]
+include = ["src/**/*.rs", "Cargo.toml", "Cargo.lock", "README.md", "/*.svg", "LICENSE*"]
 
 
 [package.metadata.binstall.signing]
@@ -21,11 +21,11 @@ pubkey = "RWRukfafJ1oiG5PP1IKXRgoI7ntXPbys8WUm9ol6oanMKxEtXdbXisri"
 [dependencies]
 anyhow = "1"
 clap = { version = "4.6", features = ["derive"] }
-resvg = { version = "0.48", default-features = false }
+resvg = { version = "0.49", default-features = false }
 oxipng = { version = "10.2", features = ["parallel", "zopfli"], default-features = false }
-oxvg_optimiser = { version = "0.0.8", default-features = false }
-oxvg_ast = { version = "0.0.8", features = ["roxmltree"] }
-oxvg_path = "0.0.8"
+oxvg_optimiser = { version = "0.0.9", default-features = false }
+oxvg_ast = { version = "0.0.9", features = ["roxmltree"] }
+oxvg_path = "0.0.9"
 quick-xml = "0.42"
 svgtypes = "0.16"
 

@@ -1,6 +1,8 @@
+// src/svg_optimize.rs
+
 //! SVG optimization via oxvg.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context as _, Result, anyhow};
 use oxvg_ast::{
 	parse::roxmltree::{ParsingOptions, parse_with_options},
 	serialize::{Indent, Node as _, Options},
@@ -13,12 +15,17 @@ use oxvg_optimiser::{
 use oxvg_path::geometry::Tolerance;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
+use resvg::tiny_skia::Pixmap;
+use std::ops::RangeInclusive;
 
 use crate::cli::{Cli, DEFAULT_PRECISION_THRESHOLD};
-use crate::render;
+use crate::{
+	render, svg_circle, svg_display, svg_fill, svg_gradient, svg_id, svg_mix, svg_namespace,
+	svg_pair, svg_path, svg_stroke, svg_style,
+};
 
 /// Candidates for the search, ascending: the lowest one under the budget wins.
-const PRECISION_RANGE: std::ops::RangeInclusive<i32> = 0..=5;
+const PRECISION_RANGE: RangeInclusive<i32> = 0..=5;
 
 /// The lowest candidate, which every mix starts from.
 const PRECISION_FLOOR: i32 = *PRECISION_RANGE.start();
@@ -26,6 +33,12 @@ const PRECISION_FLOOR: i32 = *PRECISION_RANGE.start();
 /// The precision used when the search is off, and when no candidate fits. This is the default of
 /// oxvg itself.
 const DEFAULT_PRECISION: i32 = 3;
+
+/// The extra decimals of the path data in oxvg, which `svg_path` then rounds off.
+///
+/// oxvg rounds each relative command on its own, so the error adds up along a path. Two more
+/// decimals keep that error below what a render can show.
+const PATH_EXTRA: i32 = 2;
 
 /// The square that candidates are rendered on to be compared.
 const CANVAS: u32 = 1024;
@@ -43,7 +56,10 @@ pub enum Precision {
 	/// The fixed default of oxvg.
 	Default,
 	/// The lowest precision whose render stays within `threshold` of the source.
-	Adaptive { threshold: f64 },
+	Adaptive {
+		/// Largest rendered difference, 0..1.
+		threshold: f64,
+	},
 }
 
 /// How much effort to spend on an SVG.
@@ -58,24 +74,26 @@ pub struct Opts {
 }
 
 impl Opts {
+	/// Options from the command line.
 	pub fn from_cli(cli: &Cli) -> Self {
 		let threshold = if cli.no_precision {
 			None
 		} else {
 			Some(cli.precision.unwrap_or(DEFAULT_PRECISION_THRESHOLD))
 		};
-		Self {
+		return Self {
 			enabled: !cli.no_optimize,
 			keep_dimensions: cli.no_resize,
-			precision: threshold.map_or(Precision::Default, |threshold| Precision::Adaptive {
-				threshold,
+			precision: threshold.map_or(Precision::Default, |threshold| {
+				return Precision::Adaptive { threshold };
 			}),
-		}
+		};
 	}
 }
 
 /// An optimized SVG, and what the precision search settled on.
 pub struct Optimized {
+	/// The optimized SVG.
 	pub svg: String,
 	/// `None` when the search did not run.
 	pub precision: Option<i32>,
@@ -89,21 +107,33 @@ pub struct Optimized {
 pub fn maybe_optimize(src: &str, opts: Opts) -> Result<Optimized> {
 	if !opts.enabled {
 		return Ok(Optimized {
-			svg: src.to_string(),
+			svg: src.to_owned(),
 			precision: None,
 			difference: None,
 			upgrades: None,
 		});
 	}
 	let dynamic = is_dynamic(src)?;
+	// Circles snap to the canvas on purpose, so the search compares against the snapped ones.
+	let circled = svg_circle::to_circles(src, dynamic)?;
+	let src = circled.as_str();
 	match opts.precision {
-		Precision::Default => Ok(Optimized {
-			svg: optimize_at(src, &jobs(opts.keep_dimensions, None, dynamic), dynamic)?,
-			precision: None,
-			difference: None,
-			upgrades: None,
-		}),
-		Precision::Adaptive { threshold } => search(src, opts.keep_dimensions, threshold, dynamic),
+		Precision::Default => {
+			return Ok(Optimized {
+				svg: optimize_at(
+					src,
+					&jobs(opts.keep_dimensions, None, dynamic),
+					None,
+					dynamic,
+				)?,
+				precision: None,
+				difference: None,
+				upgrades: None,
+			});
+		}
+		Precision::Adaptive { threshold } => {
+			return search(src, opts.keep_dimensions, threshold, dynamic);
+		}
 	}
 }
 
@@ -113,13 +143,13 @@ pub fn maybe_optimize(src: &str, opts: Opts) -> Result<Optimized> {
 /// A `style` attribute beats a rule of a stylesheet, and a presentation attribute loses to one, so
 /// `convert_style_to_attrs` is unsafe here. A script names an element by its `id`, so the dead root
 /// `id` stays as well.
-fn is_dynamic(src: &str) -> Result<bool> {
+pub fn is_dynamic(src: &str) -> Result<bool> {
 	let mut reader = Reader::from_str(src);
 	loop {
 		match reader.read_event().context("parsing SVG")? {
 			Event::Eof => return Ok(false),
-			Event::Start(e) | Event::Empty(e)
-				if matches!(e.local_name().into_inner(), "style" | "script") =>
+			Event::Start(tag) | Event::Empty(tag)
+				if matches!(tag.local_name().into_inner(), "style" | "script") =>
 			{
 				return Ok(true);
 			}
@@ -143,9 +173,14 @@ fn search(src: &str, keep_dimensions: bool, threshold: f64, dynamic: bool) -> Re
 	// Every candidate, lowest precision first, for the mix to draw from.
 	let mut built: Vec<String> = Vec::new();
 
-	for p in PRECISION_RANGE {
-		let svg = optimize_at(src, &jobs(keep_dimensions, Some(p), dynamic), dynamic)?;
-		if p == DEFAULT_PRECISION {
+	for precision in PRECISION_RANGE {
+		let svg = optimize_at(
+			src,
+			&jobs(keep_dimensions, Some(precision), dynamic),
+			Some(precision),
+			dynamic,
+		)?;
+		if precision == DEFAULT_PRECISION {
 			fallback = Some(svg.clone());
 		}
 		// Identical bytes cannot render differently, so the previous verdict still stands.
@@ -159,18 +194,18 @@ fn search(src: &str, keep_dimensions: bool, threshold: f64, dynamic: bool) -> Re
 		if let Ok(candidate) = rasterize(&svg) {
 			let difference = render::rmse(&reference, &candidate)?;
 			if difference <= threshold {
-				return refine(svg, p, difference, &built, &reference, threshold);
+				return refine(svg, precision, difference, &built, &reference, threshold);
 			}
-			if best.is_none_or(|(_, b)| difference < b) {
-				best = Some((p, difference));
+			if best.is_none_or(|(_, lowest)| return difference < lowest) {
+				best = Some((precision, difference));
 			}
 		}
 		previous = Some(svg);
 	}
 
 	match best {
-		Some((p, difference)) => eprintln!(
-			"Warning: no precision met the {:.2}% budget (best {:.2}% at precision {p}), using \
+		Some((precision, difference)) => eprintln!(
+			"Warning: no precision met the {:.2}% budget (best {:.2}% at precision {precision}), using \
 			 precision {DEFAULT_PRECISION}.",
 			threshold * 100.0,
 			difference * 100.0
@@ -183,18 +218,22 @@ fn search(src: &str, keep_dimensions: bool, threshold: f64, dynamic: bool) -> Re
 
 	// What is written is what was written before the search existed.
 	match fallback {
-		Some(svg) => Ok(Optimized {
-			svg,
-			precision: Some(DEFAULT_PRECISION),
-			difference: None,
-			upgrades: None,
-		}),
-		None => Ok(Optimized {
-			svg: optimize_at(src, &jobs(keep_dimensions, None, dynamic), dynamic)?,
-			precision: None,
-			difference: None,
-			upgrades: None,
-		}),
+		Some(svg) => {
+			return Ok(Optimized {
+				svg,
+				precision: Some(DEFAULT_PRECISION),
+				difference: None,
+				upgrades: None,
+			});
+		}
+		None => {
+			return Ok(Optimized {
+				svg: optimize_at(src, &jobs(keep_dimensions, None, dynamic), None, dynamic)?,
+				precision: None,
+				difference: None,
+				upgrades: None,
+			});
+		}
 	}
 }
 
@@ -208,61 +247,74 @@ fn refine(
 	precision: i32,
 	difference: f64,
 	built: &[String],
-	reference: &resvg::tiny_skia::Pixmap,
+	reference: &Pixmap,
 	threshold: f64,
 ) -> Result<Optimized> {
-	let kept = |svg: String, upgrades| Optimized {
-		svg,
-		precision: Some(precision),
-		difference: Some(difference),
-		upgrades,
+	let kept = |svg: String, upgrades| {
+		return Optimized {
+			svg,
+			precision: Some(precision),
+			difference: Some(difference),
+			upgrades,
+		};
 	};
 	// Nothing sits below the lowest precision, and a mix can only reach what the lowest one saves.
-	let room = built.first().is_some_and(|base| base.len() < winner.len());
+	let room = built
+		.first()
+		.is_some_and(|base| return base.len() < winner.len());
 	if precision == PRECISION_FLOOR || !room {
 		return Ok(kept(winner, None));
 	}
 
 	let mut measure = |svg: &str| -> Result<Option<f64>> {
 		match rasterize(svg) {
-			Ok(pixmap) => Ok(Some(render::rmse(reference, &pixmap)?)),
+			Ok(pixmap) => return Ok(Some(render::rmse(reference, &pixmap)?)),
 			// A mix that does not render is no candidate, and the next try may still be one.
-			Err(_) => Ok(None),
+			Err(_) => return Ok(None),
 		}
 	};
-	match crate::svg_mix::mix(built, threshold, &mut measure)? {
-		Some(mixed) if mixed.svg.len() < winner.len() => Ok(Optimized {
-			svg: mixed.svg,
-			precision: Some(precision),
-			difference: Some(mixed.difference),
-			upgrades: Some(mixed.upgrades),
-		}),
-		_ => Ok(kept(winner, None)),
+	match svg_mix::mix(built, threshold, &mut measure)? {
+		Some(mixed) if mixed.svg.len() < winner.len() => {
+			return Ok(Optimized {
+				svg: mixed.svg,
+				precision: Some(precision),
+				difference: Some(mixed.difference),
+				upgrades: Some(mixed.upgrades),
+			});
+		}
+		_ => return Ok(kept(winner, None)),
 	}
 }
 
 /// Rasterize `svg` onto the comparison canvas.
-fn rasterize(svg: &str) -> Result<resvg::tiny_skia::Pixmap> {
+fn rasterize(svg: &str) -> Result<Pixmap> {
 	let tree = render::load_tree_from_data(svg.as_bytes())?;
-	render::render_size(&tree, CANVAS, CANVAS)
+	return render::render_size(&tree, CANVAS, CANVAS);
 }
 
 /// Run `jobs` over `src` and serialize the result.
 ///
-/// Five cleanups frame the oxvg jobs. The dead root `id`, a lent gradient, a `gradientTransform` and
-/// the opacity decimals go first, since the jobs read all four. The namespace declarations that
-/// nothing uses go last, since the serializer repeats the ones it cannot place.
-fn optimize_at(src: &str, jobs: &Jobs, dynamic: bool) -> Result<String> {
+/// Eight cleanups frame the oxvg jobs. The dead root `id`, an initial `display`, a `fill` that no
+/// shape inherits, a lent gradient, a `gradientTransform`, the opacity decimals and a fill with its
+/// stroked copy go first, since the jobs read all seven. The namespace declarations that nothing uses go last, since the
+/// serializer repeats the ones it cannot place.
+fn optimize_at(src: &str, jobs: &Jobs, precision: Option<i32>, dynamic: bool) -> Result<String> {
 	// The root `id` goes first: it stops `remove_useless_stroke_and_fill` on the whole document.
-	let named = crate::svg_id::strip_dead_root_id(src, dynamic)?;
+	let named = svg_id::strip_dead_root_id(src, dynamic)?;
+	// An initial `display` stops `collapse_groups` on a layer.
+	let named = svg_display::strip_inline(&named, dynamic)?;
+	// A `fill` that no shape inherits stops `collapse_groups` too.
+	let named = svg_fill::strip_unused(&named, dynamic)?;
 	// A gradient that only lends its stops is written into the one that borrows them, before the fold
 	// reads the transform that the borrower inherits.
-	let lent = crate::svg_gradient::inline(&named, dynamic)?;
+	let lent = svg_gradient::inline(&named, dynamic)?;
 	// Gradients are folded next, so the numbers the fold produces are rounded with the rest.
-	let folded = crate::svg_gradient::flatten(&lent)?;
+	let folded = svg_gradient::flatten(&lent)?;
 	// Opacities are rounded before the jobs, since the serializer of the styles keeps what it reads.
-	let short = crate::svg_style::round_opacities(&folded)?;
-	crate::svg_namespace::strip_unused(&run_passes(&short, jobs)?)
+	let short = svg_style::round_opacities(&folded)?;
+	// A fill and its stroked copy become one element, which `merge_paths` can then join.
+	let paired = svg_pair::merge_pairs(&short, dynamic)?;
+	return svg_namespace::strip_unused(&run_passes(&paired, jobs, precision, dynamic)?);
 }
 
 /// Run the job list until it stops paying.
@@ -270,21 +322,25 @@ fn optimize_at(src: &str, jobs: &Jobs, dynamic: bool) -> Result<String> {
 /// A run reads what the run before it wrote, so a rounded number can now merge with its neighbour.
 /// A run that writes no fewer bytes is dropped: the fixed point is reached, or the jobs are trading a
 /// shape for a longer one.
-fn run_passes(src: &str, jobs: &Jobs) -> Result<String> {
-	let mut best = run_jobs(src, jobs)?;
+fn run_passes(src: &str, jobs: &Jobs, precision: Option<i32>, dynamic: bool) -> Result<String> {
+	let mut best = run_jobs(src, jobs, precision, dynamic)?;
 	for _ in 1..MAX_PASSES {
-		let next = run_jobs(&best, jobs)?;
+		let next = run_jobs(&best, jobs, precision, dynamic)?;
 		if next.len() >= best.len() {
 			break;
 		}
 		best = next;
 	}
-	Ok(best)
+	return Ok(best);
 }
 
-fn run_jobs(src: &str, jobs: &Jobs) -> Result<String> {
+/// `precision` rounds the path data after the jobs, which round it with `PATH_EXTRA` more decimals.
+///
+/// Outlines are joined last: they only meet once `collapse_groups` has flattened their groups, and
+/// the next run cleans up the joined path data.
+fn run_jobs(src: &str, jobs: &Jobs, precision: Option<i32>, dynamic: bool) -> Result<String> {
 	// The document lives in an arena that ends with the closure, so the string is all that leaves.
-	parse_with_options(
+	let out = parse_with_options(
 		src,
 		// A DOCTYPE must parse before `remove_doctype` can strip it.
 		ParsingOptions {
@@ -294,17 +350,23 @@ fn run_jobs(src: &str, jobs: &Jobs) -> Result<String> {
 		|dom, allocator| -> Result<String> {
 			jobs.run(dom, &Info::new(allocator))
 				// `JobsError` borrows the arena, so only its message survives.
-				.map_err(|e| anyhow!("{e}"))
+				.map_err(|err| anyhow!("{err}"))
 				.context("oxvg optimization")?;
 			// `minify` shortens attribute values (`10px` -> `10`) and is separate from `indent`.
-			dom.serialize_with_options(Options {
-				indent: Indent::Tabs,
-				..Options::default()
-			})
-			.context("serializing the optimized SVG")
+			return dom
+				.serialize_with_options(Options {
+					indent: Indent::Tabs,
+					..Options::default()
+				})
+				.context("serializing the optimized SVG");
 		},
 	)
-	.context("parsing SVG")?
+	.context("parsing SVG")??;
+	let out = match precision {
+		Some(digits) => svg_path::round_paths(&out, digits)?,
+		None => out,
+	};
+	return svg_stroke::merge_strokes(&out, dynamic);
 }
 
 /// The default preset, plus the svgy settings.
@@ -325,41 +387,42 @@ fn jobs(keep_dimensions: bool, precision: Option<i32>, dynamic: bool) -> Jobs {
 		// the serializer from indenting the document, which is why it must go.
 		remove_attrs: Some(RemoveAttrs {
 			// The default separator is `:`, which a prefixed attribute name needs for itself.
-			elem_separator: "|".to_string(),
-			attrs: vec!["*|xml:space".to_string()],
+			elem_separator: "|".to_owned(),
+			attrs: vec!["*|xml:space".to_owned()],
 			..RemoveAttrs::default()
 		}),
 		// A future `--keep-ids` sets `cleanup_ids` to `remove: false, minify: false`.
 		..Jobs::default()
 	};
-	let Some(p) = precision else {
+	let Some(digits) = precision else {
 		return jobs;
 	};
 
 	jobs.cleanup_numeric_values = Some(CleanupNumericValues {
 		// Above 5 this aborts the whole run rather than skipping the job.
-		float_precision: u8::try_from(p.clamp(0, 5)).unwrap_or(5),
+		float_precision: u8::try_from(digits.clamp(0, 5)).unwrap_or(5),
 		..CleanupNumericValues::default()
 	});
 	jobs.convert_shape_to_path = Some(ConvertShapeToPath {
-		float_precision: p,
+		float_precision: digits,
 		..ConvertShapeToPath::default()
 	});
 	jobs.convert_path_data = Some(ConvertPathData {
 		// `positional` and `angular` are absolute distances, not digit counts, so they stay put.
 		tolerance: Tolerance {
-			precision: p,
+			// `svg_path` rounds the rest of the way without drift.
+			precision: digits + PATH_EXTRA,
 			..Tolerance::default()
 		},
 		..ConvertPathData::default()
 	});
 	jobs.convert_transform = Some(ConvertTransform {
 		// 0 rounds to integers rather than turning rounding off, so the floor is 1.
-		float_precision: p.max(1),
-		transform_precision: (p + 2).max(1),
+		float_precision: digits.max(1),
+		transform_precision: (digits + 2).max(1),
 		..ConvertTransform::default()
 	});
-	jobs
+	return jobs;
 }
 
 #[cfg(test)]
@@ -368,7 +431,7 @@ mod tests {
 
 	/// Optimize at the fixed default, the behaviour from before the search existed.
 	fn fixed(src: &str, keep_dimensions: bool) -> String {
-		maybe_optimize(
+		return maybe_optimize(
 			src,
 			Opts {
 				enabled: true,
@@ -377,11 +440,11 @@ mod tests {
 			},
 		)
 		.unwrap()
-		.svg
+		.svg;
 	}
 
 	fn adaptive(src: &str, threshold: f64) -> Optimized {
-		maybe_optimize(
+		return maybe_optimize(
 			src,
 			Opts {
 				enabled: true,
@@ -389,7 +452,7 @@ mod tests {
 				precision: Precision::Adaptive { threshold },
 			},
 		)
-		.unwrap()
+		.unwrap();
 	}
 
 	#[test]
@@ -460,6 +523,15 @@ mod tests {
 		assert!(!out.contains("fill-rule"), "{out}");
 	}
 
+	/// An Inkscape layer holds only `display:inline`, so the group goes.
+	#[test]
+	fn an_inline_layer_is_collapsed() {
+		let src = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><g id="layer1" style="display:inline"><path fill="red" d="M0 0h5v5H0Z"/><path fill="blue" d="M5 5h5v5H5Z"/></g></svg>"#;
+		let out = fixed(src, false);
+		assert!(!out.contains("<g"), "{out}");
+		assert!(!out.contains("display"), "{out}");
+	}
+
 	/// A rule of a stylesheet beats a presentation attribute, and the source paints the square red.
 	/// The move to attributes would make it blue, so the `style` attribute stays.
 	#[test]
@@ -470,16 +542,16 @@ mod tests {
 		assert!(!out.contains("#00f"), "{out}");
 	}
 
-	/// The segments are merged before the numbers are rounded, so a run of lines that rounding makes
+	/// `svg_path` rounds the path data after the jobs, so a run of lines that rounding makes
 	/// collinear is only merged by the run after it.
 	#[test]
 	fn a_second_pass_merges_what_rounding_made_collinear() {
 		let src = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 40"><path fill="#000" d="M1 1l0.04 10l-0.04 10l0.03 10h5v-30Z"/></svg>"##;
 		let all = jobs(false, Some(1), false);
-		let one = run_jobs(src, &all).unwrap();
-		let many = run_passes(src, &all).unwrap();
-		// Three vertical lines that the first run leaves side by side.
-		assert!(one.contains("v10 10 10"), "{one}");
+		let one = run_jobs(src, &all, Some(1), false).unwrap();
+		let many = run_passes(src, &all, Some(1), false).unwrap();
+		// Three vertical lines that the first run leaves apart.
+		assert!(one.contains("L1 21l0 10"), "{one}");
 		assert!(many.contains("v30"), "{many}");
 	}
 
@@ -488,8 +560,8 @@ mod tests {
 	fn the_passes_never_write_more_than_the_first_one() {
 		let src = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="#000" d="M12.3456 50.7891c4.1357-22.8642 31.9187-33.4501 49.2318-19.7734 12.6429 9.9871 14.3095 30.2286 3.4172 42.1129-11.7433 12.8118-34.8821 11.9042-45.9376-1.4287-4.2119-5.9218-7.1642-13.4419-6.7114-20.9108Z"/></svg>"##;
 		let all = jobs(false, Some(1), false);
-		let one = run_jobs(src, &all).unwrap();
-		let many = run_passes(src, &all).unwrap();
+		let one = run_jobs(src, &all, Some(1), false).unwrap();
+		let many = run_passes(src, &all, Some(1), false).unwrap();
 		assert!(many.len() <= one.len(), "{many}");
 	}
 
@@ -528,26 +600,23 @@ mod tests {
 		let src = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs><linearGradient id="the-gradient" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="10" y2="10"><stop offset="0" stop-color="#f00"/><stop offset="1" stop-color="#00f"/></linearGradient></defs><rect width="10" height="10" fill="url(#the-gradient)"/></svg>"##;
 		let out = fixed(src, false);
 
-		let start = out.find("url(#").expect("reference kept") + "url(#".len();
-		let end = start + out[start..].find(')').expect("closed reference");
-		let target = &out[start..end];
+		let (_, after) = out.split_once("url(#").expect("reference kept");
+		let (target, _) = after.split_once(')').expect("closed reference");
 		assert!(out.contains(&format!(r#"id="{target}""#)), "{out}");
 	}
 
 	/// End to end: the optimized bytes still parse, and the size contract holds.
 	// The viewBox carries these two values verbatim, so an exact comparison is the assertion.
-	#[allow(clippy::float_cmp)]
 	#[test]
 	fn optimized_output_still_renders() {
 		use crate::cli::Target;
-		use crate::svg_resize::Canvas;
+		use crate::svg_resize::{Canvas, transform_svg};
 
 		let src = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><rect width="200" height="100" fill="#000"/></svg>"##;
-		let resized =
-			crate::svg_resize::transform_svg(src, Target::Square(1024), Canvas::Tight).unwrap();
+		let resized = transform_svg(src, Target::Square(1024), Canvas::Tight).unwrap();
 		let out = fixed(&resized, false);
 
-		let tree = crate::render::load_tree_from_data(out.as_bytes()).unwrap();
+		let tree = render::load_tree_from_data(out.as_bytes()).unwrap();
 		assert_eq!(tree.size().width(), 1024.0);
 		assert_eq!(tree.size().height(), 512.0);
 	}
@@ -567,8 +636,9 @@ mod tests {
 	fn a_mix_spends_the_decimals_where_they_show() {
 		use std::fmt::Write as _;
 
-		let big = "M112.37 512.61c0-221.44 179.55-401.02 400.99-401.02s401.02 179.58 401.02 401.02\
-		           -179.58 400.99-401.02 400.99S112.37 734.05 112.37 512.61Z";
+		// An ellipse: a circle would become a `<circle>`.
+		let big = "M112.37 512.61c0-165.44 179.55-300.02 400.99-300.02s401.02 134.58 401.02 300.02\
+		           -179.58 299.99-401.02 299.99S112.37 678.05 112.37 512.61Z";
 		let mut src = format!(
 			r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><path fill="#0a7" d="{big}"/>"##
 		);
@@ -590,7 +660,7 @@ mod tests {
 		// The big shape keeps a decimal, and the small ones are written whole.
 		assert!(out.svg.contains("M112.4 512.6"), "{}", out.svg);
 		assert!(out.svg.contains("M100 140h9v9h-9Z"), "{}", out.svg);
-		assert!(crate::render::load_tree_from_data(out.svg.as_bytes()).is_ok());
+		assert!(render::load_tree_from_data(out.svg.as_bytes()).is_ok());
 	}
 
 	/// Curves need the decimals: a tight budget must push the search above the lowest precision.
@@ -599,8 +669,11 @@ mod tests {
 		let src = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="#000" d="M12.3456 50.7891c4.1357-22.8642 31.9187-33.4501 49.2318-19.7734 12.6429 9.9871 14.3095 30.2286 3.4172 42.1129-11.7433 12.8118-34.8821 11.9042-45.9376-1.4287-4.2119-5.9218-7.1642-13.4419-6.7114-20.9108Z"/></svg>"##;
 		let threshold = 0.002;
 		let out = adaptive(src, threshold);
-		let p = out.precision.expect("a precision was chosen");
-		assert!(p > 0, "precision {p} should be above the lowest");
+		let precision = out.precision.expect("a precision was chosen");
+		assert!(
+			precision > 0,
+			"precision {precision} should be above the lowest"
+		);
 		assert!(out.difference.unwrap() <= threshold);
 	}
 
@@ -611,7 +684,7 @@ mod tests {
 		let src = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="#000" d="M12.3456 50.7891c4.1357-22.8642 31.9187-33.4501 49.2318-19.7734 12.6429 9.9871 14.3095 30.2286 3.4172 42.1129-11.7433 12.8118-34.8821 11.9042-45.9376-1.4287-4.2119-5.9218-7.1642-13.4419-6.7114-20.9108Z"/></svg>"##;
 		let out = adaptive(src, -1.0);
 		assert_eq!(out.precision, Some(DEFAULT_PRECISION));
-		assert!(crate::render::load_tree_from_data(out.svg.as_bytes()).is_ok());
+		assert!(render::load_tree_from_data(out.svg.as_bytes()).is_ok());
 	}
 
 	/// A budget of zero is met when the render is pixel-identical, which it can be.

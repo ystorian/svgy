@@ -1,10 +1,12 @@
+// src/svg_namespace.rs
+
 //! Drop namespace declarations that nothing uses.
 //!
 //! Editors leave declarations like `xmlns:svg` behind, and the optimizer copies them onto every
 //! element it writes. A prefix that no element or attribute name uses carries no meaning, so the
 //! declaration goes. The default `xmlns` always stays: it is what makes the document an SVG.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context as _, Result, anyhow};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
 use quick_xml::writer::Writer;
@@ -19,13 +21,17 @@ pub fn strip_unused(src: &str) -> Result<String> {
 	loop {
 		match reader.read_event().context("parsing SVG")? {
 			Event::Eof => break,
-			Event::Start(e) => writer.write_event(Event::Start(without_unused(&e, &used)?))?,
-			Event::Empty(e) => writer.write_event(Event::Empty(without_unused(&e, &used)?))?,
+			Event::Start(element) => {
+				writer.write_event(Event::Start(without_unused(&element, &used)?))?;
+			}
+			Event::Empty(element) => {
+				writer.write_event(Event::Empty(without_unused(&element, &used)?))?;
+			}
 			other => writer.write_event(other)?,
 		}
 	}
 
-	Ok(String::from_utf8(writer.into_inner())?)
+	return Ok(String::from_utf8(writer.into_inner())?);
 }
 
 /// Prefixes that an element or attribute name spells out, `xlink:href` -> `xlink`.
@@ -34,15 +40,15 @@ fn used_prefixes(src: &str) -> Result<HashSet<String>> {
 	let mut used = HashSet::new();
 
 	loop {
-		let e = match reader.read_event().context("parsing SVG")? {
+		let element = match reader.read_event().context("parsing SVG")? {
 			Event::Eof => break,
-			Event::Start(e) | Event::Empty(e) => e,
+			Event::Start(element) | Event::Empty(element) => element,
 			_ => continue,
 		};
-		if let Some(prefix) = prefix_of(e.name().into_inner()) {
-			used.insert(prefix.to_string());
+		if let Some(prefix) = prefix_of(element.name().into_inner()) {
+			used.insert(prefix.to_owned());
 		}
-		for attr in e.attributes() {
+		for attr in element.attributes() {
 			let attr = attr.map_err(|err| anyhow!("attribute: {err}"))?;
 			let key = attr.key.into_inner();
 			// A declaration is not a use of the prefix it declares.
@@ -50,22 +56,23 @@ fn used_prefixes(src: &str) -> Result<HashSet<String>> {
 				continue;
 			}
 			if let Some(prefix) = prefix_of(key) {
-				used.insert(prefix.to_string());
+				used.insert(prefix.to_owned());
 			}
 		}
 	}
-	Ok(used)
+	return Ok(used);
 }
 
 /// The prefix of a qualified name, `svg:path` -> `svg`.
 fn prefix_of(name: &str) -> Option<&str> {
-	name.split_once(':').map(|(prefix, _)| prefix)
+	return name.split_once(':').map(|(prefix, _)| return prefix);
 }
 
-fn without_unused(e: &BytesStart, used: &HashSet<String>) -> Result<BytesStart<'static>> {
-	let mut out = BytesStart::new(e.name().into_inner().to_string());
+/// Copy of the element without unused namespaces.
+fn without_unused(element: &BytesStart, used: &HashSet<String>) -> Result<BytesStart<'static>> {
+	let mut out = BytesStart::new(element.name().into_inner().to_owned());
 
-	for attr in e.attributes() {
+	for attr in element.attributes() {
 		let attr = attr.map_err(|err| anyhow!("attribute: {err}"))?;
 		let key = attr.key.into_inner();
 		if let Some(prefix) = key.strip_prefix("xmlns:")
@@ -78,7 +85,7 @@ fn without_unused(e: &BytesStart, used: &HashSet<String>) -> Result<BytesStart<'
 			.into_owned();
 		out.push_attribute((key, val.as_str()));
 	}
-	Ok(out)
+	return Ok(out);
 }
 
 #[cfg(test)]

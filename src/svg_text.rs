@@ -1,3 +1,5 @@
+// src/svg_text.rs
+
 //! Remove `<text>` from an SVG document.
 //!
 //! resvg is built without its `text` feature (see `Cargo.toml`), so glyphs are never shaped: they
@@ -8,7 +10,7 @@
 //! Text is a property of the source rather than an error, so the caller warns and converts the
 //! remaining artwork.
 
-use anyhow::{Context, Result};
+use anyhow::{Context as _, Result};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
 use quick_xml::writer::Writer;
@@ -27,22 +29,23 @@ pub fn strip_text(src: &str) -> Result<(String, bool)> {
 		match reader.read_event().context("parsing SVG")? {
 			Event::Eof => break,
 			// Skipping to the matching end tag takes the whole subtree with it.
-			Event::Start(e) if is_text(&e) => {
+			Event::Start(element) if is_text(&element) => {
 				reader
-					.read_to_end(e.name())
+					.read_to_end(element.name())
 					.context("unterminated <text> element")?;
 				removed = true;
 			}
-			Event::Empty(e) if is_text(&e) => removed = true,
+			Event::Empty(element) if is_text(&element) => removed = true,
 			other => writer.write_event(other)?,
 		}
 	}
 
-	Ok((String::from_utf8(writer.into_inner())?, removed))
+	return Ok((String::from_utf8(writer.into_inner())?, removed));
 }
 
-fn is_text(e: &BytesStart) -> bool {
-	e.local_name().as_ref() == "text"
+/// Whether the element is a `<text>`.
+fn is_text(element: &BytesStart) -> bool {
+	return element.local_name().as_ref() == "text";
 }
 
 #[cfg(test)]
@@ -78,7 +81,7 @@ mod tests {
 		assert_eq!(out, "<svg><rect/></svg>");
 
 		let (out, removed) =
-			strip_text(r"<svg:svg><svg:text>Hi</svg:text><svg:rect/></svg:svg>").unwrap();
+			strip_text("<svg:svg><svg:text>Hi</svg:text><svg:rect/></svg:svg>").unwrap();
 		assert!(removed);
 		assert_eq!(out, "<svg:svg><svg:rect/></svg:svg>");
 	}

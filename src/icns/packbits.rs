@@ -1,3 +1,5 @@
+// src/icns/packbits.rs
+
 //! PackBits-style RLE used by the icns ARGB (`ic04`/`ic05`) chunks.
 //!
 //! Ported verbatim from `createicns.c` (`RleEncodeChannel`): control bytes in `0x00..=0x7F` mean
@@ -40,7 +42,7 @@ pub fn rle_encode_channel(input: &[u8]) -> Vec<u8> {
 			i = lit_end;
 		}
 	}
-	out
+	return out;
 }
 
 #[cfg(test)]
