@@ -200,6 +200,13 @@ jobs:
         with:
           mold-version: 3.0.0
 
+      - name: Install cargo tools
+        if: startsWith(matrix.os, 'ubuntu')
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: |
+            just
+
       - name: Checkout the source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -236,11 +243,11 @@ jobs:
       # All the next cargo commands are with `--frozen` (--locked and --offline)
 
       - name: Test
-        run: cargo test --frozen --profile ci --all-features --workspace
+        run: just test ci
 
       - name: Linux - Check and lint with Clippy
         if: startsWith(matrix.os, 'ubuntu')
-        run: cargo clippy --frozen --profile ci --all-features --workspace -- -D warnings
+        run: just clippy --strict ci
 
       - name: Prune the workspace artifacts before saving the cache
         if: steps.cargo-cache.outputs.cache-hit != 'true'
