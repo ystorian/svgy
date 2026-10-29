@@ -21,6 +21,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 env:
+  # Optional minimum Rust toolchain version.
+  # - empty: Use the runner's preinstalled toolchain and skip caching.
+  # - set: Install and cache that version only when the runner has an older one.
+  RUST_VERSION: "1.99.1"
+
   # Always display colored outputs.
   CARGO_TERM_COLOR: always
 
@@ -32,11 +37,6 @@ env:
 
   # Disable debug info to reduce the size of `./target`
   CARGO_PROFILE_TEST_DEBUG: 0
-
-  # Optional Rust toolchain override.
-  # - empty: Use the runner's preinstalled toolchain and skip caching.
-  # - set: Install and cache that specific version when it differs from the runner.
-  RUST_VERSION: "1.98.1"
 
   # Link with LLVM's lld-link on Windows, faster than the default linker.
   CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER: lld-link.exe
@@ -53,38 +53,45 @@ jobs:
 
   changes:
     # Uses `dorny/paths-filter` with `.github/filters.yaml` to skip irrelevant jobs.
-    name: Detect changes
-    runs-on: ubuntu-slim
+    name: Workflows
+    uses: ystorian/workflows/.github/workflows/detect_changes.yaml@d44c66f5b7f3ab40cab485240ad0247a48dce664 # v1.2.0
     permissions:
       contents: read
-    outputs:
-      ci: ${{ steps.filter.outputs.ci || 'true' }}
-    steps:
-      - name: Checkout the source
-        if: github.event_name == 'push'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Detect file changes based on filters.yaml
-        if: github.event_name == 'push'
-        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
-        id: filter
-        with:
-          predicate-quantifier: 'every'
-          filters: .github/filters.yaml
 
 
   check:
     name: Check - Linux arm64
     needs: changes
-    if: needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-26.04-arm
     permissions:
+      actions: write # Required to cancel the `test` jobs on failure.
       contents: read
 
     steps:
+
+      - name: Install cargo tools
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: |
+            cargo-deny
+            just
+            zizmor
+
+      - name: Install Pinact
+        # Temporary workaround for https://github.com/suzuki-shunsuke/pinact-action/issues/1209
+        run: |
+          set -euo pipefail
+          version="5.0.2"
+          release="https://github.com/suzuki-shunsuke/pinact/releases/download/v${version}"
+          archive="pinact_linux_arm64.tar.gz"
+          curl -fsSL -o "/tmp/${archive}" "${release}/${archive}"
+          curl -fsSL -o /tmp/pinact_checksums.txt "${release}/pinact_${version}_checksums.txt"
+          (cd /tmp && grep " ${archive}\$" pinact_checksums.txt | sha256sum -c -)
+          mkdir -p "/tmp/pinact_${version}"
+          tar -xzf "/tmp/${archive}" -C "/tmp/pinact_${version}" pinact
+          echo "/tmp/pinact_${version}" >> "$GITHUB_PATH"
+
       - name: Checkout the source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -96,35 +103,35 @@ jobs:
           cargo fmt --all --check
 
       - name: Check action versions with Pinact
-        uses: suzuki-shunsuke/pinact-action@896d595f299e71d65b9d28349d6956abe144390a # v3.0.0
-        with:
-          fix: "false"
-          verify: "true"
-          verify_min_age: "true"
-          min_age: "7"
-
-      - name: Install cargo tools
-        uses: taiki-e/install-action@4076c08d76dba979c11a7285295b0716c1d67908 # v2.87.15
-        with:
-          tool: |
-            cargo-deny
-            just@1.58.0
-            zizmor
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: just check_actions
 
       - name: Check Just recipes
         run: just check_just
 
       - name: Check actions with Zizmor
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: just audit_actions
 
       - name: Check Rust vulnerabilities with cargo-deny
         run: just deny
 
+      - name: Cancel on failure
+        # Cancel the `test` jobs on failure since they don't depend on `check`.
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: gh run cancel "${RUN_ID}" --repo "${REPO}"
+
 
   test:
     name: Test - ${{matrix.name}}
     needs: changes
-    if: needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.run == 'true'
     runs-on: ${{matrix.os}}
     permissions:
       contents: read
@@ -145,27 +152,14 @@ jobs:
 
     steps:
 
-      - name: Checkout the source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Windows - Exclude build directories from Defender
+      - name: Windows - Make it faster
         if: startsWith(matrix.os, 'windows')
         shell: pwsh
-        env:
-          WORKSPACE: ${{ github.workspace }}
         run: |
-          Add-MpPreference -ExclusionPath "$env:WORKSPACE\target"
-          Add-MpPreference -ExclusionPath "$env:USERPROFILE\.cargo"
-          Add-MpPreference -ExclusionPath "$env:USERPROFILE\.rustup"
           fsutil behavior set disablelastaccess 1
           fsutil behavior set disable8dot3 1
 
-      - name: Display the current Rust version and toolchains
-        run: rustup -V && rustup show --verbose
-
-      - name: Check for a pinned Rust version
+      - name: Check the minimum Rust version ${{ env.RUST_VERSION }}
         id: toolchain
         run: |
           ver_newer() {
@@ -178,45 +172,38 @@ jobs:
           }
           CURRENT="$(rustc --version | cut -d' ' -f2)"
           if [ -z "${RUST_VERSION}" ]; then
-            echo "No pinned version, using the preinstalled version ${CURRENT}."
+            echo "No minimum version set, using ${CURRENT}."
             echo "preinstalled=true" >> "$GITHUB_OUTPUT"
-          elif [ "${CURRENT}" = "${RUST_VERSION}" ]; then
-            echo "The preinstalled version ${CURRENT} matches the pinned version."
-            echo "preinstalled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "The preinstalled version ${CURRENT} differs from the pinned version \
-              ${RUST_VERSION} - will install ${RUST_VERSION} and cache it."
+          elif ver_newer "${RUST_VERSION}" "${CURRENT}"; then
+            echo "Runner is on ${CURRENT}, older than ${RUST_VERSION}, installing ${RUST_VERSION}."
             echo "preinstalled=false" >> "$GITHUB_OUTPUT"
-            if ver_newer "${CURRENT}" "${RUST_VERSION}"; then
-              echo "::warning title=The pinned version is behind the runner::The preinstalled \
-                version is ${CURRENT} but RUST_VERSION overrides it to an older version \
-                ${RUST_VERSION}. Unset the override to reduce wasting cache and action minutes."
-            fi
+          else
+            echo "Runner is on ${CURRENT}, not installing ${RUST_VERSION}."
+            echo "preinstalled=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Cache the Rust toolchain
-        if: steps.toolchain.outputs.preinstalled != 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        # zizmor: ignore[cache-poisoning]
-        id: rustup-cache
-        with:
-          path: ~/.rustup
-          key: rustup-${{runner.os}}-${{runner.arch}}-${{env.RUST_VERSION}}
-
       - name: Update the Rust toolchain
-        if: steps.toolchain.outputs.preinstalled != 'true' && steps.rustup-cache.outputs.cache-hit != 'true'
+        if: steps.toolchain.outputs.preinstalled != 'true'
         run: rustup update --no-self-update ${RUST_VERSION}
 
       - name: Set the default Rust toolchain
         if: steps.toolchain.outputs.preinstalled != 'true'
         run: rustup default ${RUST_VERSION}
 
-      - name: Add Rust components
-        if: steps.toolchain.outputs.preinstalled != 'true' && steps.rustup-cache.outputs.cache-hit != 'true'
-        run: rustup component add rustfmt clippy
+      - name: Linux - Add Rust components
+        if: startsWith(matrix.os, 'ubuntu') && steps.toolchain.outputs.preinstalled != 'true'
+        run: rustup component add clippy
 
-      - name: Display the updated Rust version and toolchains
-        run: rustup -V && rustup show --verbose && rustup component list --installed
+      - name: Linux - Setup Mold
+        if: startsWith(matrix.os, 'ubuntu')
+        uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
+        with:
+          mold-version: 3.0.0
+
+      - name: Checkout the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Define the Cargo cache keys
         id: keys
@@ -224,7 +211,7 @@ jobs:
           LOCK_HASH: ${{ hashFiles('**/Cargo.lock') }}
         run: |
           echo "lock=$(echo "$LOCK_HASH" | cut -c1-12)" >> "$GITHUB_OUTPUT"
-          echo "rustc=${RUST_VERSION:-$(rustc --version | cut -d' ' -f2)}" >> "$GITHUB_OUTPUT"
+          echo "rustc=$(rustc --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
 
       - name: Cache the Cargo crates
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -244,8 +231,7 @@ jobs:
         if: steps.cargo-cache.outputs.cache-hit != 'true'
         run: cargo fetch --locked
 
-      - name: Validate Rust formatting
-        run: cargo fmt --all --check
+      # The step "Check Rust formatting" (cargo fmt --all --check) is done by the `check` job.
 
       # All the next cargo commands are with `--frozen` (--locked and --offline)
 
@@ -278,49 +264,20 @@ jobs:
           du -sh target/ci
 
 
-  cache-cleanup:
-    name: Cache cleanup
+  cargo-cache-cleanup:
+    name: Workflows
     needs: test
     if: github.ref == 'refs/heads/main'
-    # This needs the `gh` CLI, not available on `ubuntu-slim`.
-    runs-on: ubuntu-26.04-arm
+    uses: ystorian/workflows/.github/workflows/cargo_cache_cleanup.yaml@d44c66f5b7f3ab40cab485240ad0247a48dce664 # v1.2.0
     permissions:
-      actions: write # Required to list and delete the cache entries of this repository.
-
-    steps:
-      - name: Delete the superseded Cargo caches
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          gh api "repos/${REPO}/actions/caches?per_page=100&ref=refs/heads/main" --paginate \
-            --jq '.actions_caches[] | select(.key | startswith("cargo-")) | [.id, .key, .created_at] | @tsv' \
-            | sort -k3 -r \
-            | awk -F'\t' '{ split($2, f, "-"); g = f[1]"-"f[2]"-"f[3]"-"f[4]; if (seen[g]++) print $1, $2 }' \
-            | while read -r id key; do
-                echo "Deleting the superseded cache ${key}"
-                gh api -X DELETE "repos/${REPO}/actions/caches/${id}"
-              done
+      actions: write # Required to list and delete the cache entries.
 
 
-  # Set `Require status checks to pass` only to `Status check`.
+  # Set `Require status checks to pass` only to `Workflows / Status check`.
   status:
-    name: Status check
+    name: Workflows
     needs: [changes, check, test]
     if: always()
-    runs-on: ubuntu-slim
-    steps:
-      - name: Validate jobs status
-        env:
-          CHANGES_RESULT: ${{ needs.changes.result }}
-          CHECK_RESULT: ${{ needs.check.result }}
-          TEST_RESULT: ${{ needs.test.result }}
-        run: |
-          echo "changes=$CHANGES_RESULT check=$CHECK_RESULT test=$TEST_RESULT"
-          if [ "$CHANGES_RESULT" = "failure" ] || [ "$CHANGES_RESULT" = "cancelled" ] \
-            || [ "$CHECK_RESULT" = "failure" ] || [ "$CHECK_RESULT" = "cancelled" ] \
-            || [ "$TEST_RESULT" = "failure" ] || [ "$TEST_RESULT" = "cancelled" ]; then
-            echo "::error::A required CI job failed or was cancelled."
-            exit 1
-          fi
-          echo "All required CI jobs passed or were skipped."
+    uses: ystorian/workflows/.github/workflows/status_check.yaml@d44c66f5b7f3ab40cab485240ad0247a48dce664 # v1.2.0
+    with:
+      needs: ${{ toJSON(needs) }}

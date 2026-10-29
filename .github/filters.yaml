@@ -1,4 +1,4 @@
-# .github/filters.yaml
+# @template/.github/filters.yaml
 
 # Shared path filters for `dorny/paths-filter` in the `changes` job.
 #
@@ -7,7 +7,7 @@
 # - It's not possible to re-include a file with a positive pattern.
 
 
-# Common exclusions, changes in these files are ignored in all actions.
+# [shared] Common exclusions, changes in these files are ignored in all actions.
 _common: &common
   # Must begin with `**`.
   - "**"
@@ -32,18 +32,25 @@ _common: &common
   # This file.
   - "!.github/filters.yaml"
 
+  # [shared] Common exclusions of CI files, for release filters.
+_ci: &ci
+  - "!deny.toml"
+  - "!.gitignore"
+  - "!.github/workflows/ci**.yaml"
 
-# CI: Ignore files only used in release.
-ci:
-  - *common
+  # [shared] Common exclusions of release files, for CI filter.
+_release: &release
   - "!*Dockerfile*"
   - "!.dockerignore"
   - "!.github/workflows/release*.yaml"
 
 
+# CI: Ignore files only used in release.
+ci:
+  - *common
+  - *release
+
 # Release: Ignore files only used in CI.
 release:
   - *common
-  - "!deny.toml"
-  - "!.gitignore"
-  - "!.github/workflows/ci**.yaml"
+  - *ci

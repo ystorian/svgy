@@ -19,7 +19,7 @@ ci:
 
 	# CI tests.
 	just deny
-	just test
-	just clippy
+	just test ci
+	just clippy ci
 
 	echo {{ done('') }}

@@ -1,0 +1,22 @@
+# @template/.clippy.toml
+
+allow-expect-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-panic-in-tests = true
+allow-print-in-tests = true
+allow-unwrap-in-tests = true
+
+doc-valid-idents = [
+	"IPv4",
+	"IPv6",
+	"KiB",
+	"MiB",
+	"GiB",
+	"TiB",
+	"MHz",
+	"GHz",
+	"FreeBSD",
+	"NetBSD",
+	"OpenBSD",
+	"SQLx",
+]
