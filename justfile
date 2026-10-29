@@ -1,11 +1,18 @@
 # @template/justfile
 
+# Tip:
+# - Alias `j` to `just`: `just alias_just`
+
 # These recipes use features that require a recent version of Just.
 set minimum-version := '1.58.0'
 
 # Set the default shell on Windows to `bash` (installed with Git).
 [windows]
 set shell := ['C:\Program Files\Git\bin\bash.exe', '-cu']
+
+# Set the default script interpreter on Windows for `[script]` recipes.
+[windows]
+set script-interpreter := ['C:\Program Files\Git\bin\sh.exe', '-eu']
 
 # Don't print comments.
 set ignore-comments
@@ -22,8 +29,8 @@ set lists
 # Skip evaluating unused variables.
 set lazy
 
-# Use the `?` sigil to prefix a command to stop the current recipe if the command exits with status
-# code 1, however execution of other recipes will continue.
+# Use the `?` sigil to prefix a command.
+# Prefixed commands with exit 1 will stop the current recipe, without stopping other recipes.
 set guards
 
 # Import common recipes.
