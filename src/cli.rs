@@ -1,3 +1,5 @@
+// src/cli.rs
+
 //! Command-line interface (clap).
 
 use clap::{Args, Parser};
@@ -26,11 +28,12 @@ pub const DEFAULT_PRECISION_THRESHOLD: f64 = 0.02;
 )]
 // `Option<Option<PathBuf>>` is how clap spells a flag with an optional value, and all three cases
 // are meaningful here: absent, present bare (derive the name), present with a path.
-#[allow(clippy::option_option)]
+#[expect(clippy::option_option, reason = "clap optional-value flag")]
 // The flags are independent switches on one command line.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(clippy::struct_excessive_bools, reason = "independent CLI switches")]
+/// Command-line arguments.
 pub struct Cli {
-	/// Input SVG file
+	/// Input SVG file.
 	pub input: PathBuf,
 
 	/// Write an SVG (default when no other target is given).
@@ -53,10 +56,11 @@ pub struct Cli {
 	#[arg(long, value_name = "PATH", num_args = 0..=1, require_equals = true)]
 	pub round: Option<Option<PathBuf>>,
 
+	/// Target size of the output.
 	#[command(flatten)]
 	pub size: SizeOpts,
 
-	/// Fraction of the inscribed circle's radius left empty (0.0..1.0); --round only
+	/// Fraction of the inscribed circle's radius left empty (0.0..1.0); --round only.
 	#[arg(
 		long,
 		value_name = "FRACTION",
@@ -66,7 +70,7 @@ pub struct Cli {
 	)]
 	pub padding: Option<f64>,
 
-	/// Budget for the precision search, as a fraction (0.0..1.0) of the source render
+	/// Budget for the precision search, as a fraction (0.0..1.0) of the source render.
 	#[arg(
 		long,
 		value_name = "FRACTION",
@@ -76,35 +80,35 @@ pub struct Cli {
 	)]
 	pub precision: Option<f64>,
 
-	/// Keep the fixed precision of the optimizer instead of searching for the lowest one
+	/// Keep the fixed precision of the optimizer instead of searching for the lowest one.
 	#[arg(long = "no-precision")]
 	pub no_precision: bool,
 
-	/// Suffix used when a destination is not specified
+	/// Suffix used when a destination is not specified.
 	#[arg(long, default_value = DEFAULT_SUFFIX)]
 	pub suffix: String,
 
-	/// Keep the original dimensions
+	/// Keep the original dimensions.
 	#[arg(long = "no-resize")]
 	pub no_resize: bool,
 
-	/// Fit the canvas to the artwork instead of padding it to the requested size
+	/// Fit the canvas to the artwork instead of padding it to the requested size.
 	#[arg(long = "no-square")]
 	pub no_square: bool,
 
-	/// Skip oxipng optimization
+	/// Skip oxipng optimization.
 	#[arg(long = "no-optimize")]
 	pub no_optimize: bool,
 
-	/// Compress PNGs with Zopfli: 1~5% smaller, 100x times slower
+	/// Compress PNG with Zopfli: 1~5% smaller, 100x times slower.
 	#[arg(long)]
 	pub zopfli: bool,
 
-	/// Skip the 256-color BMP entries for 16x16 and 32x32
+	/// Skip the 256-color BMP entries for 16x16 and 32x32.
 	#[arg(long = "no-legacy-ico")]
 	pub no_legacy: bool,
 
-	/// Remove every <image> element instead of stopping
+	/// Remove every <image> element instead of stopping.
 	#[arg(long = "strip-images")]
 	pub strip_images: bool,
 }
@@ -113,11 +117,11 @@ impl Cli {
 	/// `true` when no output target was requested, in which case `--svg` is implied. Any explicit
 	/// target turns that default off.
 	pub fn no_target(&self) -> bool {
-		self.svg.is_none()
+		return self.svg.is_none()
 			&& self.png.is_none()
 			&& self.ico.is_none()
 			&& self.icns.is_none()
-			&& self.round.is_none()
+			&& self.round.is_none();
 	}
 
 	/// Whether an SVG output is wanted, and where it goes.
@@ -126,7 +130,7 @@ impl Cli {
 			// The implicit default: `svgy file.svg` -> `file.svgy.svg`.
 			return Some(&None);
 		}
-		self.svg.as_ref()
+		return self.svg.as_ref();
 	}
 }
 
@@ -148,23 +152,24 @@ impl Target {
 	/// was given, so the other follows the aspect ratio and cannot be padded to a known size.
 	pub fn canvas(self) -> (Option<f64>, Option<f64>) {
 		match self {
-			Target::Square(n) => (Some(f64::from(n)), Some(f64::from(n))),
-			Target::Width(w) => (Some(f64::from(w)), None),
-			Target::Height(h) => (None, Some(f64::from(h))),
-			Target::Both(w, h) => (Some(f64::from(w)), Some(f64::from(h))),
+			Target::Square(n) => return (Some(f64::from(n)), Some(f64::from(n))),
+			Target::Width(w) => return (Some(f64::from(w)), None),
+			Target::Height(height) => return (None, Some(f64::from(height))),
+			Target::Both(w, height) => return (Some(f64::from(w)), Some(f64::from(height))),
 		}
 	}
 }
 
+/// Target size options.
 #[derive(Args, Clone, Copy)]
 pub struct SizeOpts {
-	/// Longest side in pixels; takes precedence over --width/--height
+	/// Longest side in pixels; takes precedence over --width/--height.
 	#[arg(short = 's', long = "size")]
 	pub size: Option<u32>,
-	/// Target width in pixels
+	/// Target width in pixels.
 	#[arg(long)]
 	pub width: Option<u32>,
-	/// Target height in pixels
+	/// Target height in pixels.
 	#[arg(long)]
 	pub height: Option<u32>,
 }
@@ -173,28 +178,27 @@ impl SizeOpts {
 	/// Resolve to a [`Target`], or `None` if no size was given.
 	pub fn target(&self) -> Option<Target> {
 		match (self.size, self.width, self.height) {
-			(Some(s), _, _) => Some(Target::Square(s)),
-			(None, Some(w), Some(h)) => Some(Target::Both(w, h)),
-			(None, Some(w), None) => Some(Target::Width(w)),
-			(None, None, Some(h)) => Some(Target::Height(h)),
-			(None, None, None) => None,
+			(Some(size), _, _) => return Some(Target::Square(size)),
+			(None, Some(w), Some(height)) => return Some(Target::Both(w, height)),
+			(None, Some(w), None) => return Some(Target::Width(w)),
+			(None, None, Some(height)) => return Some(Target::Height(height)),
+			(None, None, None) => return None,
 		}
 	}
 
 	/// The target to resize by, falling back to [`DEFAULT_SIZE`].
 	pub fn target_or_default(&self) -> Target {
-		self.target().unwrap_or(Target::Square(DEFAULT_SIZE))
+		return self.target().unwrap_or(Target::Square(DEFAULT_SIZE));
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use clap::Parser;
 	use std::path::Path;
 
 	fn parse(args: &[&str]) -> Cli {
-		Cli::try_parse_from(args).expect("parse")
+		return Cli::try_parse_from(args).expect("parse");
 	}
 
 	#[test]
@@ -251,6 +255,7 @@ mod tests {
 
 	/// The search runs unless it is turned off, and then the budget is irrelevant.
 	#[test]
+	#[expect(clippy::float_cmp_const, reason = "the value is copied, not computed")]
 	fn the_search_runs_unless_no_precision_is_given() {
 		use crate::svg_optimize::{Opts, Precision};
 

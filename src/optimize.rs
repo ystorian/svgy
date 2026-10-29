@@ -1,7 +1,9 @@
+// src/optimize.rs
+
 //! PNG optimization via oxipng.
 
 use crate::cli::Cli;
-use anyhow::{Context, Result};
+use anyhow::{Context as _, Result};
 
 /// Preset used by default.
 const PRESET: u8 = 4;
@@ -16,11 +18,12 @@ pub struct Opts {
 }
 
 impl Opts {
+	/// Options from the command line.
 	pub fn from_cli(cli: &Cli) -> Self {
-		Self {
+		return Self {
 			enabled: !cli.no_optimize,
 			zopfli: cli.zopfli,
-		}
+		};
 	}
 }
 
@@ -34,5 +37,5 @@ pub fn maybe_optimize(png: Vec<u8>, opts: Opts) -> Result<Vec<u8>> {
 	if opts.zopfli {
 		options.deflater = oxipng::Deflater::Zopfli(oxipng::ZopfliOptions::default());
 	}
-	oxipng::optimize_from_memory(&png, &options).context("oxipng optimization")
+	return oxipng::optimize_from_memory(&png, &options).context("oxipng optimization");
 }

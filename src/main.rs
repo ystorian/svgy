@@ -1,9 +1,9 @@
+// src/main.rs
+
 #![deny(unsafe_code)]
-#![warn(clippy::pedantic)]
+
 // Geometry reads better with the names the maths uses: a circle is (cx, cy, r), a triangle is (a,
 // b, c), and spelling those out obscures more than it helps.
-#![allow(clippy::many_single_char_names, clippy::similar_names)]
-
 mod affine;
 mod cli;
 mod icns;
@@ -12,40 +12,49 @@ mod numeric;
 mod optimize;
 mod render;
 mod round;
+mod svg_circle;
+mod svg_clip;
+mod svg_display;
+mod svg_fill;
 mod svg_gradient;
 mod svg_id;
 mod svg_image;
 mod svg_mix;
 mod svg_namespace;
 mod svg_optimize;
+mod svg_pair;
+mod svg_path;
 mod svg_resize;
+mod svg_stroke;
 mod svg_style;
 mod svg_text;
 
-use anyhow::{Context, Result, bail};
-use clap::Parser;
+use anyhow::{Context as _, Result, bail};
+use clap::Parser as _;
 use cli::{Cli, ROUND_SUFFIX};
 use resvg::usvg;
 use std::path::{Path, PathBuf};
+use std::{fs, process};
 
 fn main() {
-	if let Err(e) = run() {
-		eprintln!("Error: {e:#}");
-		std::process::exit(1);
+	if let Err(err) = run() {
+		eprintln!("Error: {err:#}");
+		process::exit(1);
 	}
 }
 
+/// Run the command line and write each target.
 fn run() -> Result<()> {
 	let cli = Cli::parse();
 
 	// `--precision=2` meaning "2 percent" would otherwise silently pick the coarsest output.
-	if let Some(t) = cli.precision
-		&& !(0.0..=1.0).contains(&t)
+	if let Some(fraction) = cli.precision
+		&& !(0.0..=1.0).contains(&fraction)
 	{
-		bail!("--precision must be a fraction between 0.0 and 1.0, got {t}");
+		bail!("--precision must be a fraction between 0.0 and 1.0, got {fraction}");
 	}
 
-	let src = std::fs::read_to_string(&cli.input)
+	let src = fs::read_to_string(&cli.input)
 		.with_context(|| format!("reading {}", cli.input.display()))?;
 
 	// A bitmap cannot be rendered and cannot be converted to paths, so the document is rejected
@@ -74,6 +83,9 @@ fn run() -> Result<()> {
 			 (Inkscape: Path > Object to Path)."
 		);
 	}
+
+	// A clip the size of the canvas goes before the resize pads the canvas.
+	let src = svg_clip::strip_canvas_clips(&src, svg_optimize::is_dynamic(&src)?)?;
 
 	// Resize first: every other target is derived from the resized document, so
 	// `--size` reaches the SVG, the PNG and the rounded output alike.
@@ -126,62 +138,73 @@ fn run() -> Result<()> {
 	// Rounding runs last, inside whatever canvas the resize established.
 	if let Some(dest) = &cli.round {
 		let out = resolve_output(&cli, dest.as_deref(), ROUND_SUFFIX, "svg")?;
-		let r = round::round_str(&resized, cli.padding)?;
-		let svg = svg_optimize::maybe_optimize(&r.svg, svg_opt)?;
+		let rounded = round::round_str(&resized, cli.padding)?;
+		let svg = svg_optimize::maybe_optimize(&rounded.svg, svg_opt)?;
 		write(&out, svg.svg.as_bytes())?;
-		let chosen = if r.auto_padding { ", chosen" } else { "" };
+		let chosen = if rounded.auto_padding { ", chosen" } else { "" };
 		println!(
 			"  scaled content x{:.4} into r={} circle (padding {}{chosen})",
-			r.scale,
-			numeric::fmt_num(r.radius),
-			numeric::fmt_num(r.padding),
+			rounded.scale,
+			numeric::fmt_num(rounded.radius),
+			numeric::fmt_num(rounded.padding),
 		);
 		report_precision(&svg);
 	}
 
-	Ok(())
+	return Ok(());
 }
 
+/// Pixel size of the tree, at least 1.
 fn cmd_png_size(tree: &usvg::Tree) -> (u32, u32) {
 	// Rounding to whole pixels is the point of the cast, and `max(1.0)` keeps the value positive
 	// before it is taken.
-	#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-	let round = |v: f32| f64::from(v).round().max(1.0) as u32;
+	#[expect(
+		clippy::cast_possible_truncation,
+		clippy::cast_sign_loss,
+		reason = "round to whole pixels"
+	)]
+	let round = |value: f32| return f64::from(value).round().max(1.0) as u32;
 	let size = tree.size();
-	(round(size.width()), round(size.height()))
+	return (round(size.width()), round(size.height()));
 }
 
+/// Render the tree and write it as a PNG.
 fn write_png(tree: &usvg::Tree, out: &Path, opt: optimize::Opts) -> Result<()> {
 	// The tree already carries the requested size, so the PNG is its intrinsic size: no letterbox,
 	// and `--size` means the same thing it does for the SVG.
-	let (w, h) = cmd_png_size(tree);
-	let pixmap = render::render_size(tree, w, h)?;
+	let (w, height) = cmd_png_size(tree);
+	let pixmap = render::render_size(tree, w, height)?;
 	let png = render::encode_png(&pixmap)?;
 	let png = optimize::maybe_optimize(png, opt)?;
-	std::fs::write(out, &png).with_context(|| format!("writing {}", out.display()))?;
-	println!("Wrote {} ({w}x{h}, {} bytes)", out.display(), png.len());
-	Ok(())
+	fs::write(out, &png).with_context(|| format!("writing {}", out.display()))?;
+	println!(
+		"Wrote {} ({w}x{height}, {} bytes)",
+		out.display(),
+		png.len()
+	);
+	return Ok(());
 }
 
 /// Report what the precision search settled on, when it ran.
 fn report_precision(out: &svg_optimize::Optimized) {
-	if let Some(p) = out.precision {
+	if let Some(precision) = out.precision {
 		// A mix names the range it spans, since only some elements reach the top of it.
 		let level = match out.upgrades {
-			Some(n) => format!("precision 0 to {p} ({n} refined)"),
-			None => format!("precision {p}"),
+			Some(n) => format!("precision 0 to {precision} ({n} refined)"),
+			None => format!("precision {precision}"),
 		};
 		match out.difference {
-			Some(d) => println!("  {level}, {:.2}% difference", d * 100.0),
+			Some(diff) => println!("  {level}, {:.2}% difference", diff * 100.0),
 			None => println!("  {level}"),
 		}
 	}
 }
 
+/// Write bytes to a file and report it.
 fn write(out: &Path, bytes: &[u8]) -> Result<()> {
-	std::fs::write(out, bytes).with_context(|| format!("writing {}", out.display()))?;
+	fs::write(out, bytes).with_context(|| format!("writing {}", out.display()))?;
 	println!("Wrote {} ({} bytes)", out.display(), bytes.len());
-	Ok(())
+	return Ok(());
 }
 
 /// Where a target writes: the explicit destination if given, else the source name with `suffix` and
@@ -191,20 +214,24 @@ fn write(out: &Path, bytes: &[u8]) -> Result<()> {
 /// does, so the parent is created here rather than failing partway through a multi-target run.
 fn resolve_output(cli: &Cli, dest: Option<&Path>, suffix: &str, ext: &str) -> Result<PathBuf> {
 	let out = match dest {
-		Some(p) => p.to_path_buf(),
+		Some(path) => path.to_path_buf(),
 		None => default_name(&cli.input, suffix, ext),
 	};
 	if let Some(dir) = out.parent()
 		&& !dir.as_os_str().is_empty()
 	{
-		std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+		fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
 	}
-	Ok(out)
+	return Ok(out);
 }
 
+/// Source name with `suffix` and `ext` added.
 fn default_name(input: &Path, suffix: &str, ext: &str) -> PathBuf {
-	let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("out");
-	input.with_file_name(format!("{stem}.{suffix}.{ext}"))
+	let stem = input
+		.file_stem()
+		.and_then(|name| return name.to_str())
+		.unwrap_or("out");
+	return input.with_file_name(format!("{stem}.{suffix}.{ext}"));
 }
 
 #[cfg(test)]

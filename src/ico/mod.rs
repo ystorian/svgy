@@ -1,3 +1,5 @@
+// src/ico/mod.rs
+
 //! Windows .ico writer (multi-size).
 //!
 //! The container is written by hand rather than through the `ico` crate: that crate only encodes
@@ -7,9 +9,10 @@
 
 mod bmp;
 
-use anyhow::{Context, Result};
+use anyhow::{Context as _, Result};
 use resvg::usvg;
-use std::io::Write;
+use std::fs::File;
+use std::io::Write as _;
 use std::path::Path;
 
 use crate::{optimize, render};
@@ -25,15 +28,17 @@ pub const SIZES: &[u32] = &[16, 32, 48, 64, 128, 256];
 
 /// Sizes that additionally get a 256-color BMP entry. Only the two smallest are worth it: a
 /// 256-color session is by definition an old one, where these are the sizes actually drawn, and the
-/// color table costs a flat 1 KiB per entry.
+/// color table costs a flat 1 KB per entry.
 const LEGACY_SIZES: &[u32] = &[16, 32];
 
 /// One image in the file, already encoded.
 struct Entry {
+	/// Side length in pixels.
 	px: u32,
 	/// Declared bits per pixel, which is what Windows matches against the display depth when
 	/// choosing between two entries of the same size.
 	bits: u16,
+	/// Encoded PNG or BMP bytes.
 	data: Vec<u8>,
 }
 
@@ -77,12 +82,12 @@ pub fn write_ico(
 	// Image data follows the directory, in the same order as the entries.
 	let mut offset =
 		u32::try_from(6 + ENTRY_LEN * entries.len()).expect("directory is a few hundred bytes");
-	for e in &entries {
+	for entry in &entries {
 		// A dimension of 256 is stored as 0; anything larger cannot be encoded.
-		let dim = if e.px == 256 {
+		let dim = if entry.px == 256 {
 			0u8
 		} else {
-			u8::try_from(e.px).expect("ICO sizes are at most 256")
+			u8::try_from(entry.px).expect("ICO sizes are at most 256")
 		};
 		buf.push(dim); // width
 		buf.push(dim); // height
@@ -91,20 +96,19 @@ pub fn write_ico(
 		buf.extend_from_slice(&1u16.to_le_bytes()); // color planes
 		// For PNG entries the depth is advisory -- readers take the real one from the IHDR -- but
 		// it is what entry selection compares against.
-		buf.extend_from_slice(&e.bits.to_le_bytes());
-		let len = u32::try_from(e.data.len()).context("ICO entry exceeds 4 GiB")?;
+		buf.extend_from_slice(&entry.bits.to_le_bytes());
+		let len = u32::try_from(entry.data.len()).context("ICO entry exceeds 4 GiB")?;
 		buf.extend_from_slice(&len.to_le_bytes());
 		buf.extend_from_slice(&offset.to_le_bytes());
 		offset += len;
 	}
 
-	for e in &entries {
-		buf.extend_from_slice(&e.data);
+	for entry in &entries {
+		buf.extend_from_slice(&entry.data);
 	}
 
-	let mut file =
-		std::fs::File::create(out).with_context(|| format!("creating {}", out.display()))?;
+	let mut file = File::create(out).with_context(|| format!("creating {}", out.display()))?;
 	file.write_all(&buf)
 		.with_context(|| format!("writing {}", out.display()))?;
-	Ok(entries.len())
+	return Ok(entries.len());
 }

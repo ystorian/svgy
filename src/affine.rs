@@ -1,3 +1,5 @@
+// src/affine.rs
+
 //! Bake an affine `A(p) = s*p + t` into SVG coordinates, with no `transform` added.
 //!
 //! Both coordinate-baking commands share this: `svg` resize scales and centers the artwork on the
@@ -5,21 +7,75 @@
 //! `s*n + t`, lengths and relative offsets get `s*n`, and existing transforms are conjugated so the
 //! document renders the same.
 
+use anyhow::{Context as _, Result, anyhow};
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::reader::Reader;
+use std::collections::HashSet;
+
 use crate::numeric::{affine_length, fmt_num, parse_num_list, scale_len_list, scale_length};
+
+/// Ids that a `<use>` instantiates, `<use href="#logo">` -> `logo`.
+pub fn use_targets(src: &str) -> Result<HashSet<String>> {
+	let mut reader = Reader::from_str(src);
+	let mut ids = HashSet::new();
+	loop {
+		let element = match reader.read_event().context("parsing SVG")? {
+			Event::Eof => break,
+			Event::Start(element) | Event::Empty(element) => element,
+			_ => continue,
+		};
+		if element.local_name().into_inner() != "use" {
+			continue;
+		}
+		for key in ["href", "xlink:href"] {
+			if let Some(href) = attr_value(&element, key)?
+				&& let Some(id) = href.trim().strip_prefix('#')
+			{
+				ids.insert(id.to_owned());
+			}
+		}
+	}
+	return Ok(ids);
+}
+
+/// A `<symbol>`, or anything a `<use>` refers to: its coordinates are relative to where the
+/// instance is placed, so a translation must not reach them.
+pub fn is_template(element: &BytesStart, templates: &HashSet<String>) -> Result<bool> {
+	if element.local_name().into_inner() == "symbol" {
+		return Ok(true);
+	}
+	return Ok(attr_value(element, "id")?.is_some_and(|id| return templates.contains(&id)));
+}
+
+/// The normalized value of one attribute, if present.
+pub fn attr_value(element: &BytesStart, key: &str) -> Result<Option<String>> {
+	for attr in element.attributes() {
+		let attr = attr.map_err(|err| anyhow!("attribute: {err}"))?;
+		if attr.key.as_ref() == key {
+			return Ok(Some(
+				attr.normalized_value(quick_xml::XmlVersion::Implicit1_0)?
+					.into_owned(),
+			));
+		}
+	}
+	return Ok(None);
+}
 
 /// Apply the affine to one attribute. Position components get `s*n + t`; lengths and relative
 /// offsets get `s*n`.
-pub fn attr(key: &str, val: &str, s: f64, tx: f64, ty: f64) -> String {
+pub fn attr(key: &str, val: &str, scale: f64, tx: f64, ty: f64) -> String {
 	match key {
-		"transform" | "gradientTransform" | "patternTransform" => transform(val, s, tx, ty),
-		"d" => path_data(val, s, tx, ty),
-		"points" => points(val, s, tx, ty),
-		"stroke-dasharray" | "dx" | "dy" => scale_len_list(val, s),
-		"x" | "cx" | "x1" | "x2" | "fx" => affine_length(val, s, tx),
-		"y" | "cy" | "y1" | "y2" | "fy" => affine_length(val, s, ty),
+		"transform" | "gradientTransform" | "patternTransform" => {
+			return transform(val, scale, tx, ty);
+		}
+		"d" => return path_data(val, scale, tx, ty),
+		"points" => return points(val, scale, tx, ty),
+		"stroke-dasharray" | "dx" | "dy" => return scale_len_list(val, scale),
+		"x" | "cx" | "x1" | "x2" | "fx" => return affine_length(val, scale, tx),
+		"y" | "cy" | "y1" | "y2" | "fy" => return affine_length(val, scale, ty),
 		"width" | "height" | "r" | "rx" | "ry" | "stroke-width" | "stroke-dashoffset"
-		| "font-size" => scale_length(val, s),
-		_ => val.to_string(),
+		| "font-size" => return scale_length(val, scale),
+		_ => return val.to_owned(),
 	}
 }
 
@@ -27,151 +83,148 @@ pub fn attr(key: &str, val: &str, s: f64, tx: f64, ty: f64) -> String {
 /// written out for them: an omitted `x` is not the same as `x="0"` once the artwork moves.
 pub fn implicit_origins(local: &str) -> &'static [&'static str] {
 	match local {
-		"rect" | "image" | "use" | "svg" | "foreignObject" => &["x", "y"],
-		"circle" | "ellipse" => &["cx", "cy"],
-		"line" => &["x1", "y1", "x2", "y2"],
-		_ => &[],
+		"rect" | "image" | "use" | "svg" | "foreignObject" => return &["x", "y"],
+		"circle" | "ellipse" => return &["cx", "cy"],
+		"line" => return &["x1", "y1", "x2", "y2"],
+		_ => return &[],
 	}
 }
 
 /// The translation an [`implicit_origins`] attribute carries.
 pub fn origin_value(key: &str, tx: f64, ty: f64) -> String {
 	match key {
-		"y" | "cy" | "y1" | "y2" => fmt_num(ty),
-		_ => fmt_num(tx),
+		"y" | "cy" | "y1" | "y2" => return fmt_num(ty),
+		_ => return fmt_num(tx),
 	}
 }
 
-fn points(v: &str, s: f64, tx: f64, ty: f64) -> String {
-	parse_num_list(v)
+/// Map each `x y` pair of a `points` list.
+fn points(val: &str, scale: f64, tx: f64, ty: f64) -> String {
+	return parse_num_list(val)
 		.chunks(2)
-		.map(|c| {
-			if c.len() == 2 {
-				format!("{} {}", fmt_num(s * c[0] + tx), fmt_num(s * c[1] + ty))
-			} else {
-				fmt_num(s * c[0] + tx)
+		.map(|pair| {
+			if pair.len() == 2 {
+				return format!(
+					"{} {}",
+					fmt_num(scale * pair[0] + tx),
+					fmt_num(scale * pair[1] + ty)
+				);
 			}
+			return fmt_num(scale * pair[0] + tx);
 		})
 		.collect::<Vec<_>>()
-		.join(" ")
+		.join(" ");
 }
 
 /// Conjugate a `transform` list by the affine `A(p) = s*p + t`: each primitive becomes `A T A^-1`.
 /// translate/rotate keep their kind; scale/skew/matrix become an equivalent `matrix(...)` (their
 /// fixed point moves under translation).
-fn transform(v: &str, s: f64, tx: f64, ty: f64) -> String {
+fn transform(val: &str, scale: f64, tx: f64, ty: f64) -> String {
 	let mut out = String::new();
-	let mut rest = v;
+	let mut rest = val;
 	loop {
 		let trimmed = rest.trim_start_matches([' ', ',', '\t', '\n', '\r']);
 		if trimmed.is_empty() {
 			break;
 		}
-		let Some(open) = trimmed.find('(') else {
+		let Some((name, after)) = trimmed.split_once('(') else {
 			out.push_str(trimmed);
 			break;
 		};
-		let Some(close) = trimmed[open + 1..].find(')') else {
+		let Some((inner, tail)) = after.split_once(')') else {
 			out.push_str(trimmed);
 			break;
 		};
-		let name = trimmed[..open].trim();
-		let args = parse_num_list(&trimmed[open + 1..open + 1 + close]);
+		let name = name.trim();
+		let args = parse_num_list(inner);
 		if !out.is_empty() {
 			out.push(' ');
 		}
-		out.push_str(&conjugate(name, &args, s, tx, ty));
-		rest = &trimmed[open + 1 + close + 1..];
+		out.push_str(&conjugate(name, &args, scale, tx, ty));
+		rest = tail;
 	}
-	out
+	return out;
 }
 
-fn conjugate(name: &str, args: &[f64], s: f64, tx: f64, ty: f64) -> String {
-	let g = |i: usize, d: f64| args.get(i).copied().unwrap_or(d);
+/// Conjugate one transform primitive by the affine.
+fn conjugate(name: &str, args: &[f64], scale: f64, tx: f64, ty: f64) -> String {
+	let arg = |i: usize, default: f64| return args.get(i).copied().unwrap_or(default);
 	match name {
 		"translate" => {
-			let (dx, dy) = (g(0, 0.0), g(1, 0.0));
-			format!("translate({} {})", fmt_num(s * dx), fmt_num(s * dy))
+			let (dx, dy) = (arg(0, 0.0), arg(1, 0.0));
+			return format!("translate({} {})", fmt_num(scale * dx), fmt_num(scale * dy));
 		}
 		"rotate" => {
 			// center is a position -> full affine (default origin -> t).
-			let (a, cx, cy) = (g(0, 0.0), g(1, 0.0), g(2, 0.0));
-			format!(
+			let (angle, cx, cy) = (arg(0, 0.0), arg(1, 0.0), arg(2, 0.0));
+			return format!(
 				"rotate({} {} {})",
-				fmt_num(a),
-				fmt_num(s * cx + tx),
-				fmt_num(s * cy + ty)
-			)
+				fmt_num(angle),
+				fmt_num(scale * cx + tx),
+				fmt_num(scale * cy + ty)
+			);
 		}
 		"scale" => {
-			let a = g(0, 1.0);
-			let b = g(1, a);
-			matrix_str(a, 0.0, 0.0, b, (1.0 - a) * tx, (1.0 - b) * ty)
+			let sx = arg(0, 1.0);
+			let sy = arg(1, sx);
+			return matrix_str([sx, 0.0, 0.0, sy, (1.0 - sx) * tx, (1.0 - sy) * ty]);
 		}
 		"skewX" => {
-			let c = (g(0, 0.0).to_radians()).tan();
-			matrix_str(1.0, 0.0, c, 1.0, -c * ty, 0.0)
+			let tan = (arg(0, 0.0).to_radians()).tan();
+			return matrix_str([1.0, 0.0, tan, 1.0, -tan * ty, 0.0]);
 		}
 		"skewY" => {
-			let b = (g(0, 0.0).to_radians()).tan();
-			matrix_str(1.0, b, 0.0, 1.0, 0.0, -b * tx)
+			let tan = (arg(0, 0.0).to_radians()).tan();
+			return matrix_str([1.0, tan, 0.0, 1.0, 0.0, -tan * tx]);
 		}
 		"matrix" => {
-			let (a, b, c, d, e, f) = (
-				g(0, 1.0),
-				g(1, 0.0),
-				g(2, 0.0),
-				g(3, 1.0),
-				g(4, 0.0),
-				g(5, 0.0),
+			let (ma, mb, mc, md, me, mf) = (
+				arg(0, 1.0),
+				arg(1, 0.0),
+				arg(2, 0.0),
+				arg(3, 1.0),
+				arg(4, 0.0),
+				arg(5, 0.0),
 			);
-			let e2 = s * e + (1.0 - a) * tx - c * ty;
-			let f2 = s * f - b * tx + (1.0 - d) * ty;
-			matrix_str(a, b, c, d, e2, f2)
+			let me2 = scale * me + (1.0 - ma) * tx - mc * ty;
+			let mf2 = scale * mf - mb * tx + (1.0 - md) * ty;
+			return matrix_str([ma, mb, mc, md, me2, mf2]);
 		}
 		_ => {
 			let joined = args
 				.iter()
-				.map(|a| fmt_num(*a))
+				.map(|val| return fmt_num(*val))
 				.collect::<Vec<_>>()
 				.join(" ");
-			format!("{name}({joined})")
+			return format!("{name}({joined})");
 		}
 	}
 }
 
-fn matrix_str(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) -> String {
-	format!(
-		"matrix({} {} {} {} {} {})",
-		fmt_num(a),
-		fmt_num(b),
-		fmt_num(c),
-		fmt_num(d),
-		fmt_num(e),
-		fmt_num(f)
-	)
+/// Format six values as `matrix(...)`.
+fn matrix_str(values: [f64; 6]) -> String {
+	return format!("matrix({})", nums(&values));
 }
 
 /// Apply the affine to path `d`: absolute coords get `s*p + t`, relative deltas get `s*p`; arc
 /// rx/ry scale, rotation and flags are preserved.
-fn path_data(d: &str, s: f64, tx: f64, ty: f64) -> String {
+fn path_data(data: &str, scale: f64, tx: f64, ty: f64) -> String {
 	use svgtypes::{PathParser, PathSegment};
 
 	// Absolute point -> affine; relative point -> scale-only.
 	let pt = |x: f64, y: f64, abs: bool| {
 		if abs {
-			(s * x + tx, s * y + ty)
-		} else {
-			(s * x, s * y)
+			return (scale * x + tx, scale * y + ty);
 		}
+		return (scale * x, scale * y);
 	};
 
 	let mut out = String::new();
 	// A leading `m` is absolute.
 	let mut first = true;
-	for seg in PathParser::from(d) {
+	for seg in PathParser::from(data) {
 		let Ok(seg) = seg else {
-			return d.to_string();
+			return data.to_owned();
 		};
 		match seg {
 			PathSegment::MoveTo { abs, x, y } => {
@@ -186,12 +239,12 @@ fn path_data(d: &str, s: f64, tx: f64, ty: f64) -> String {
 				out.push_str(&two(x, y));
 			}
 			PathSegment::HorizontalLineTo { abs, x } => {
-				let x = if abs { s * x + tx } else { s * x };
+				let x = if abs { scale * x + tx } else { scale * x };
 				cmd(&mut out, 'H', abs);
 				out.push_str(&fmt_num(x));
 			}
 			PathSegment::VerticalLineTo { abs, y } => {
-				let y = if abs { s * y + ty } else { s * y };
+				let y = if abs { scale * y + ty } else { scale * y };
 				cmd(&mut out, 'V', abs);
 				out.push_str(&fmt_num(y));
 			}
@@ -240,7 +293,7 @@ fn path_data(d: &str, s: f64, tx: f64, ty: f64) -> String {
 				let (x, y) = pt(x, y, abs);
 				cmd(&mut out, 'A', abs);
 				// The two flags are single digits, not numbers to format.
-				out.push_str(&nums(&[rx * s, ry * s, x_axis_rotation]));
+				out.push_str(&nums(&[rx * scale, ry * scale, x_axis_rotation]));
 				out.push(' ');
 				out.push(if large_arc { '1' } else { '0' });
 				out.push(' ');
@@ -253,9 +306,10 @@ fn path_data(d: &str, s: f64, tx: f64, ty: f64) -> String {
 		first = false;
 		out.push(' ');
 	}
-	out.trim_end().to_string()
+	return out.trim_end().to_owned();
 }
 
+/// Push a path command letter and a space.
 fn cmd(out: &mut String, upper: char, abs: bool) {
 	out.push(if abs {
 		upper
@@ -265,13 +319,18 @@ fn cmd(out: &mut String, upper: char, abs: bool) {
 	out.push(' ');
 }
 
-fn two(a: f64, b: f64) -> String {
-	nums(&[a, b])
+/// Format two values as `x y`.
+fn two(first: f64, second: f64) -> String {
+	return nums(&[first, second]);
 }
 
 /// Space-separated `fmt_num` of each value.
-fn nums(vs: &[f64]) -> String {
-	vs.iter().map(|v| fmt_num(*v)).collect::<Vec<_>>().join(" ")
+fn nums(values: &[f64]) -> String {
+	return values
+		.iter()
+		.map(|val| return fmt_num(*val))
+		.collect::<Vec<_>>()
+		.join(" ");
 }
 
 #[cfg(test)]
