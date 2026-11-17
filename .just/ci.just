@@ -1,10 +1,6 @@
 # .just/ci.just
 
 # Run the CI tests like in `.github/workflows/ci-rust.yaml`
-[env("CARGO_INCREMENTAL", "0")]
-[env("CARGO_PROFILE_TEST_DEBUG", "0")]
-[env("CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_RUSTFLAGS", "")]
-[env("CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS", "")]
 [group('CI')]
 ci:
 	echo {{ title(['Run all', BOLD + 'CI', 'checks']) }}
