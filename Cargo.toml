@@ -29,6 +29,10 @@ oxvg_path = "0.0.9"
 quick-xml = "0.42"
 svgtypes = "0.16"
 
+[workspace.metadata.typos.files]
+ignore-hidden = false
+extend-exclude = [".git/**", "target/**"]
+
 [profile.release]
 opt-level = "z"
 lto = true
