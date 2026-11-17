@@ -24,7 +24,7 @@ env:
   # Optional minimum Rust toolchain version.
   # - empty: Use the runner's preinstalled toolchain and skip caching.
   # - set: Install and cache that version only when the runner has an older one.
-  RUST_VERSION: "1.99.1"
+  RUST_VERSION: "1.100"
 
   # Always display colored outputs.
   CARGO_TERM_COLOR: always
@@ -52,80 +52,26 @@ env:
 jobs:
 
   changes:
-    # Uses `dorny/paths-filter` with `.github/filters.yaml` to skip irrelevant jobs.
     name: Workflows
-    uses: ystorian/workflows/.github/workflows/detect_changes.yaml@d44c66f5b7f3ab40cab485240ad0247a48dce664 # v1.2.0
+    uses: ystorian/workflows/.github/workflows/detect_changes.yaml@e8851358670fbdc073675919957d35d8a766ad96 # v1.9.1
     permissions:
       contents: read
+    with:
+      filter: ci
 
 
   check:
-    name: Check - Linux arm64
+    name: Workflows
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-26.04-arm
+    uses: ystorian/workflows/.github/workflows/check.yaml@e8851358670fbdc073675919957d35d8a766ad96 # v1.9.1
     permissions:
       actions: write # Required to cancel the `test` jobs on failure.
       contents: read
+    with:
+      tools: cargo-deny
+      recipes: check_rust check_deny
 
-    steps:
-
-      - name: Install cargo tools
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
-        with:
-          tool: |
-            cargo-deny
-            just
-            zizmor
-
-      - name: Install Pinact
-        # Temporary workaround for https://github.com/suzuki-shunsuke/pinact-action/issues/1209
-        run: |
-          set -euo pipefail
-          version="5.0.2"
-          release="https://github.com/suzuki-shunsuke/pinact/releases/download/v${version}"
-          archive="pinact_linux_arm64.tar.gz"
-          curl -fsSL -o "/tmp/${archive}" "${release}/${archive}"
-          curl -fsSL -o /tmp/pinact_checksums.txt "${release}/pinact_${version}_checksums.txt"
-          (cd /tmp && grep " ${archive}\$" pinact_checksums.txt | sha256sum -c -)
-          mkdir -p "/tmp/pinact_${version}"
-          tar -xzf "/tmp/${archive}" -C "/tmp/pinact_${version}" pinact
-          echo "/tmp/pinact_${version}" >> "$GITHUB_PATH"
-
-      - name: Checkout the source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Check Rust formatting
-        run: |
-          cargo fmt --version
-          cargo fmt --all --check
-
-      - name: Check action versions with Pinact
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: just check_actions
-
-      - name: Check Just recipes
-        run: just check_just
-
-      - name: Check actions with Zizmor
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: just audit_actions
-
-      - name: Check Rust vulnerabilities with cargo-deny
-        run: just deny
-
-      - name: Cancel on failure
-        # Cancel the `test` jobs on failure since they don't depend on `check`.
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-        run: gh run cancel "${RUN_ID}" --repo "${REPO}"
 
 
   test:
@@ -139,6 +85,7 @@ jobs:
       run:
         # Only for matrix using Windows.
         shell: bash
+    timeout-minutes: 5
 
     strategy:
       matrix:
@@ -201,7 +148,7 @@ jobs:
           mold-version: 3.0.0
 
       - name: Install cargo tools
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: |
             just
@@ -274,7 +221,7 @@ jobs:
     name: Workflows
     needs: test
     if: github.ref == 'refs/heads/main'
-    uses: ystorian/workflows/.github/workflows/cargo_cache_cleanup.yaml@d44c66f5b7f3ab40cab485240ad0247a48dce664 # v1.2.0
+    uses: ystorian/workflows/.github/workflows/cargo_cache_cleanup.yaml@e8851358670fbdc073675919957d35d8a766ad96 # v1.9.1
     permissions:
       actions: write # Required to list and delete the cache entries.
 
@@ -284,6 +231,6 @@ jobs:
     name: Workflows
     needs: [changes, check, test]
     if: always()
-    uses: ystorian/workflows/.github/workflows/status_check.yaml@d44c66f5b7f3ab40cab485240ad0247a48dce664 # v1.2.0
+    uses: ystorian/workflows/.github/workflows/status_check.yaml@e8851358670fbdc073675919957d35d8a766ad96 # v1.9.1
     with:
       needs: ${{ toJSON(needs) }}
