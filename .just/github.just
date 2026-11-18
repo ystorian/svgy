@@ -59,6 +59,8 @@ audit_actions fast fix: check_command_zizmor
 	else
 		echo {{ warning('No workflow found in .github/workflows') }};
 	fi
+
+	echo {{ done('') }}
 	exit "$status"
 
 # Check actions for pinned versions
@@ -508,30 +510,35 @@ list_org_repos owner=owner: check_command_gh
 
 # Check if `crane` is available
 [group('GitHub')]
+[no-exit-message]
 [private]
 check_command_crane:
 	just check_command crane --brew='crane'
 
 # Check if `gh` is available
 [group('GitHub')]
+[no-exit-message]
 [private]
 check_command_gh:
 	just check_command gh --brew='gh' --winget='GitHub.cli'
 
 # Check if `jq` is available
 [group('GitHub')]
+[no-exit-message]
 [private]
 check_command_jq:
 	just check_command jq --brew='jq' --winget='jqlang.jq'
 
 # Check if `pinact` is available
 [group('GitHub')]
+[no-exit-message]
 [private]
 check_command_pinact:
 	just check_command pinact --brew='pinact' --winget='suzuki-shunsuke.pinact'
 
 # Check if `zizmor` is available
 [group('GitHub')]
+[no-exit-message]
 [private]
 check_command_zizmor:
 	just check_command zizmor -m='just install_cargo_tools' -w='just install_cargo_tools'

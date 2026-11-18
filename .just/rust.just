@@ -19,6 +19,9 @@ clippy_warn_list := ['absolute_paths', 'allow_attributes', 'allow_attributes_wit
 # Clippy allow list.
 clippy_allow_list := ['arbitrary_source_item_ordering', 'assertions_on_result_states', 'default_numeric_fallback', 'float_arithmetic', 'needless_return', 'print_stdout', 'question_mark_used', 'separated_literal_suffix', 'single_call_fn']
 
+# Host target tuple.
+host_tuple := shell('rustc --print host-tuple')
+
 # Check the Visual Studio build tools environment variables
 [no-exit-message]
 [private]
@@ -195,20 +198,25 @@ prune_target profile='dev': check_command_jq
 	echo {{ title(['Prune the workspace artifacts in', BOLD + 'target/' + profile]) }}
 	# Used before the CI saves the Cargo cache.
 
-	if [ ! -d "target/{{ profile }}" ]; then
+	# Cargo names the folder `debug` for `dev` and `test`, `release` for `bench`.
+	case "{{ profile }}" in
+		dev | test) dir="target/debug" ;;
+		bench) dir="target/release" ;;
+		*) dir="target/{{ profile }}" ;;
+	esac
+
+	if [ ! -d "$dir" ]; then
 		echo {{ warning('The target is empty for this profile, nothing to prune') }};
 		exit 0;
 	fi
 
-	dir="target/{{ profile }}"
 	echo {{ note(['Before pruning:', YELLOW + '$(du -sh "target")']) }};
 
-	crates="$(cargo metadata --frozen --no-deps --format-version 1 | jq -r '.packages[].name')"
-	for crate in $crates; do
-		file="$(printf '%s' "$crate" | tr '-' '_')"
-		rm -rf "$dir/.fingerprint/$crate-"* "$dir/build/$crate-"*
-		rm -f "$dir/deps/$file-"* "$dir/deps/lib$file-"* "$dir/$crate" "$dir/$crate".*
-	done
+	# `cargo clean -p` supports all the `build-dir` layouts.
+	# Remove the `\r` that `jq` adds on Windows.
+	packages="$(cargo metadata --frozen --no-deps --format-version 1 \
+		| jq -r '.packages[].name | "-p " + .' | tr -d '\r')"
+	cargo clean --frozen --quiet --profile {{ profile }} $packages
 	rm -rf "$dir/incremental" "$dir/examples"
 	echo {{ note(['After pruning: ', GREEN + '$(du -sh "target")']) }};
 
@@ -227,14 +235,15 @@ install: check_env
 # Download the crates in `Cargo.toml`
 [group('Rust')]
 fetch:
-	echo {{ title(['Run', BOLD + 'cargo fetch']) }}
+	echo {{ title(['Run', BOLD + 'cargo fetch', 'for', BOLD + host_tuple]) }}
 
-	cargo fetch --locked --verbose
+	cargo fetch --locked --verbose --target "{{ host_tuple }}"
 
 	echo {{ done('') }}
 
 # Check if `cargo-deny` is available
 [group('Utils')]
+[no-exit-message]
 [private]
 check_command_deny:
 	just check_command cargo-deny -c='cargo-deny'

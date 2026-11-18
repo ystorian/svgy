@@ -592,6 +592,7 @@ check_typos: check_command_typos
 
 # Check if `typos` is available
 [group('Utils')]
+[no-exit-message]
 [private]
 check_command_typos:
 	just check_command typos -c='typos-cli'
