@@ -102,7 +102,7 @@ update_cargo_tools: install_cargo_tools
 # Update Cargo.lock without bumping dependencies
 [group('Cargo')]
 lock_cargo:
-	echo {{ title(['Update', GREEN + 'Cargo.lock']) }}
+	echo {{ title(['Update', GREEN + ' Cargo.lock']) }}
 
 	cargo update --offline --workspace --verbose
 
@@ -164,12 +164,12 @@ publish: publish_check
 precommit_cargo:
 	# Check if `Cargo.toml` and `Cargo.lock` are in sync.
 	if ! cargo metadata --frozen --format-version 1 --quiet >/dev/null 2>&1; then \
-		echo "Cargo.lock is not in sync with Cargo.toml, run: just lock_cargo" >&2 && exit 1; \
+		echo "Cargo.lock is not in sync with Cargo.toml, run 'just lock_cargo'" >&2 && exit 1; \
 	fi
 
 	# Check if Rust code is formatted correctly.
 	if ! cargo fmt --all --check --quiet >/dev/null 2>&1; then \
-		echo "Rust code is incorrectly formatted, run: just format" >&2 && exit 1; \
+		echo "Rust code is incorrectly formatted, run 'just format'" >&2 && exit 1; \
 	fi
 
 # Return the MSRV for this repo and its crates
@@ -209,6 +209,7 @@ create_minisign_keys:
 
 # Check if `curl` is available
 [group('Cargo')]
+[no-exit-message]
 [private]
 check_command_curl:
 	just check_command curl --brew='curl' --winget='cURL.cURL'
