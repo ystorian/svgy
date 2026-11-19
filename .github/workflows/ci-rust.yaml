@@ -24,7 +24,7 @@ jobs:
 
   changes:
     name: Workflows
-    uses: ystorian/workflows/.github/workflows/detect_changes.yaml@e8851358670fbdc073675919957d35d8a766ad96 # v1.9.1
+    uses: ystorian/workflows/.github/workflows/detect_changes.yaml@46d10d829ac525544a499be7caf21927a957c4de # v1.10.0
     permissions:
       contents: read
     with:
@@ -35,7 +35,7 @@ jobs:
     name: Workflows
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    uses: ystorian/workflows/.github/workflows/check.yaml@e8851358670fbdc073675919957d35d8a766ad96 # v1.9.1
+    uses: ystorian/workflows/.github/workflows/check.yaml@46d10d829ac525544a499be7caf21927a957c4de # v1.10.0
     permissions:
       actions: write # Required to cancel the `test` jobs on failure.
       contents: read
@@ -48,7 +48,7 @@ jobs:
     name: Workflows
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    uses: ystorian/workflows/.github/workflows/test_rust.yaml@e8851358670fbdc073675919957d35d8a766ad96 # v1.9.1
+    uses: ystorian/workflows/.github/workflows/test_rust.yaml@46d10d829ac525544a499be7caf21927a957c4de # v1.10.0
     permissions:
       contents: read
     with:
@@ -62,7 +62,7 @@ jobs:
     name: Workflows
     needs: test
     if: github.ref == 'refs/heads/main'
-    uses: ystorian/workflows/.github/workflows/cargo_cache_cleanup.yaml@e8851358670fbdc073675919957d35d8a766ad96 # v1.9.1
+    uses: ystorian/workflows/.github/workflows/cargo_cache_cleanup.yaml@46d10d829ac525544a499be7caf21927a957c4de # v1.10.0
     permissions:
       actions: write # Required to list and delete the cache entries.
 
@@ -72,6 +72,6 @@ jobs:
     name: Workflows
     needs: [changes, check, test]
     if: always()
-    uses: ystorian/workflows/.github/workflows/status_check.yaml@e8851358670fbdc073675919957d35d8a766ad96 # v1.9.1
+    uses: ystorian/workflows/.github/workflows/status_check.yaml@46d10d829ac525544a499be7caf21927a957c4de # v1.10.0
     with:
       needs: ${{ toJSON(needs) }}
